@@ -1,0 +1,50 @@
+name: Backend CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  validate:
+    name: Backend Code Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Compile Backend (TypeScript check)
+        run: npm run build
+
+  deploy:
+    name: Trigger VPS Deploy
+    needs: validate
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Dokploy Webhook
+        run: |
+          if [ -z "${{ secrets.DOKPLOY_WEBHOOK_URL }}" ]; then
+            echo "⚠️ DOKPLOY_WEBHOOK_URL secret is not set. Skipping VPS redeployment trigger."
+          else
+            echo "🚀 Triggering Backend redeployment on Dokploy VPS..."
+            curl -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}"
+            echo "✅ Redeployment signal sent!"
+          fi

@@ -1,0 +1,11 @@
+node_modules
+.medusa/server
+.medusa/admin
+.cache
+.env
+.env.test
+.git
+.github
+.vscode
+yarn.lock
+package-lock.json
