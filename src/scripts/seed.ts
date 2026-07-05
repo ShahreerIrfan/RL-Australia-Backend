@@ -370,7 +370,7 @@ export default async function seedDemoData({ container }: ExecArgs) {
   });
   logger.info("Finished seeding publishable API key data.");
 
-  logger.info("Seeding product data...");
+  logger.info("Seeding product categories...");
 
   const { result: categoryResult } = await createProductCategoriesWorkflow(
     container
@@ -378,204 +378,66 @@ export default async function seedDemoData({ container }: ExecArgs) {
     input: {
       product_categories: [
         {
-          name: "Shirts",
+          name: "Peptides",
           is_active: true,
         },
         {
-          name: "Sweatshirts",
+          name: "Nootropics & Supplements",
           is_active: true,
         },
         {
-          name: "Pants",
+          name: "Gummies & Functional Foods",
           is_active: true,
         },
         {
-          name: "Merch",
+          name: "Add-ons & Accessories",
           is_active: true,
         },
       ],
     },
   });
+
+  logger.info("Seeding peptide and supplement products...");
 
   await createProductsWorkflow(container).run({
     input: {
       products: [
         {
-          title: "Medusa T-Shirt",
+          title: "BPC-157",
           category_ids: [
-            categoryResult.find((cat) => cat.name === "Shirts")!.id,
+            categoryResult.find((cat) => cat.name === "Peptides")!.id,
           ],
-          description:
-            "Reimagine the feeling of a classic T-shirt. With our cotton T-shirts, everyday essentials no longer have to be ordinary.",
-          handle: "t-shirt",
+          description: "BPC-157 is a pentadecapeptide composed of 15 amino acids, widely researched for its regenerative properties, tissue healing, and fast recovery.",
+          handle: "bpc-157",
           weight: 400,
           status: ProductStatus.PUBLISHED,
           shipping_profile_id: shippingProfile.id,
+          metadata: {
+            dosage_mg: "5mg",
+            vial_size: "10ml",
+            coa_url: "https://rlaustralia.com/coas/bpc157.pdf"
+          },
           images: [
             {
               url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
             },
-            {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-back.png",
-            },
-            {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-white-front.png",
-            },
-            {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-white-back.png",
-            },
           ],
           options: [
             {
-              title: "Size",
-              values: ["S", "M", "L", "XL"],
-            },
-            {
-              title: "Color",
-              values: ["Black", "White"],
+              title: "Vial Size",
+              values: ["5mg"],
             },
           ],
           variants: [
             {
-              title: "S / Black",
-              sku: "SHIRT-S-BLACK",
+              title: "5mg",
+              sku: "BPC-157-5MG",
               options: {
-                Size: "S",
-                Color: "Black",
+                "Vial Size": "5mg",
               },
               prices: [
                 {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "S / White",
-              sku: "SHIRT-S-WHITE",
-              options: {
-                Size: "S",
-                Color: "White",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "M / Black",
-              sku: "SHIRT-M-BLACK",
-              options: {
-                Size: "M",
-                Color: "Black",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "M / White",
-              sku: "SHIRT-M-WHITE",
-              options: {
-                Size: "M",
-                Color: "White",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "L / Black",
-              sku: "SHIRT-L-BLACK",
-              options: {
-                Size: "L",
-                Color: "Black",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "L / White",
-              sku: "SHIRT-L-WHITE",
-              options: {
-                Size: "L",
-                Color: "White",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "XL / Black",
-              sku: "SHIRT-XL-BLACK",
-              options: {
-                Size: "XL",
-                Color: "Black",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "XL / White",
-              sku: "SHIRT-XL-WHITE",
-              options: {
-                Size: "XL",
-                Color: "White",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
+                  amount: 49.99,
                   currency_code: "usd",
                 },
               ],
@@ -588,95 +450,41 @@ export default async function seedDemoData({ container }: ExecArgs) {
           ],
         },
         {
-          title: "Medusa Sweatshirt",
+          title: "TB-500",
           category_ids: [
-            categoryResult.find((cat) => cat.name === "Sweatshirts")!.id,
+            categoryResult.find((cat) => cat.name === "Peptides")!.id,
           ],
-          description:
-            "Reimagine the feeling of a classic sweatshirt. With our cotton sweatshirt, everyday essentials no longer have to be ordinary.",
-          handle: "sweatshirt",
+          description: "TB-500 is a synthetic version of the active region of Thymosin Beta-4, research-proven to promote vascular growth, tissue flexibility, and fast wound healing.",
+          handle: "tb-500",
           weight: 400,
           status: ProductStatus.PUBLISHED,
           shipping_profile_id: shippingProfile.id,
+          metadata: {
+            dosage_mg: "5mg",
+            vial_size: "10ml",
+            coa_url: "https://rlaustralia.com/coas/tb500.pdf"
+          },
           images: [
             {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/sweatshirt-vintage-front.png",
-            },
-            {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/sweatshirt-vintage-back.png",
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
             },
           ],
           options: [
             {
-              title: "Size",
-              values: ["S", "M", "L", "XL"],
+              title: "Vial Size",
+              values: ["5mg"],
             },
           ],
           variants: [
             {
-              title: "S",
-              sku: "SWEATSHIRT-S",
+              title: "5mg",
+              sku: "TB-500-5MG",
               options: {
-                Size: "S",
+                "Vial Size": "5mg",
               },
               prices: [
                 {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "M",
-              sku: "SWEATSHIRT-M",
-              options: {
-                Size: "M",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "L",
-              sku: "SWEATSHIRT-L",
-              options: {
-                Size: "L",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "XL",
-              sku: "SWEATSHIRT-XL",
-              options: {
-                Size: "XL",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
+                  amount: 54.99,
                   currency_code: "usd",
                 },
               ],
@@ -689,95 +497,41 @@ export default async function seedDemoData({ container }: ExecArgs) {
           ],
         },
         {
-          title: "Medusa Sweatpants",
+          title: "KPV",
           category_ids: [
-            categoryResult.find((cat) => cat.name === "Pants")!.id,
+            categoryResult.find((cat) => cat.name === "Peptides")!.id,
           ],
-          description:
-            "Reimagine the feeling of classic sweatpants. With our cotton sweatpants, everyday essentials no longer have to be ordinary.",
-          handle: "sweatpants",
+          description: "KPV is an anti-inflammatory tripeptide (Lysine-Proline-Valine) researched for gut lining repair, immunological stability, and microbiome support.",
+          handle: "kpv",
           weight: 400,
           status: ProductStatus.PUBLISHED,
           shipping_profile_id: shippingProfile.id,
+          metadata: {
+            dosage_mg: "10mg",
+            vial_size: "5ml",
+            coa_url: "https://rlaustralia.com/coas/kpv.pdf"
+          },
           images: [
             {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/sweatpants-gray-front.png",
-            },
-            {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/sweatpants-gray-back.png",
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
             },
           ],
           options: [
             {
-              title: "Size",
-              values: ["S", "M", "L", "XL"],
+              title: "Vial Size",
+              values: ["10mg"],
             },
           ],
           variants: [
             {
-              title: "S",
-              sku: "SWEATPANTS-S",
+              title: "10mg",
+              sku: "KPV-10MG",
               options: {
-                Size: "S",
+                "Vial Size": "10mg",
               },
               prices: [
                 {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "M",
-              sku: "SWEATPANTS-M",
-              options: {
-                Size: "M",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "L",
-              sku: "SWEATPANTS-L",
-              options: {
-                Size: "L",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "XL",
-              sku: "SWEATPANTS-XL",
-              options: {
-                Size: "XL",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
+                  amount: 59.99,
                   currency_code: "usd",
                 },
               ],
@@ -790,95 +544,323 @@ export default async function seedDemoData({ container }: ExecArgs) {
           ],
         },
         {
-          title: "Medusa Shorts",
+          title: "Beef Liver Pills",
           category_ids: [
-            categoryResult.find((cat) => cat.name === "Merch")!.id,
+            categoryResult.find((cat) => cat.name === "Nootropics & Supplements")!.id,
           ],
-          description:
-            "Reimagine the feeling of classic shorts. With our cotton shorts, everyday essentials no longer have to be ordinary.",
-          handle: "shorts",
-          weight: 400,
+          description: "100% grass-fed desiccated beef liver capsules. Loaded with natural B12, vitamin A, iron, and folate.",
+          handle: "beef-liver-pills",
+          weight: 200,
           status: ProductStatus.PUBLISHED,
           shipping_profile_id: shippingProfile.id,
+          metadata: {
+            is_addon: true,
+            was_price: 24.99,
+            hook_text: "Nature's multivitamin: B12, iron & folate in one tiny pill."
+          },
           images: [
             {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/shorts-vintage-front.png",
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
             },
+          ],
+          options: [
             {
-              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/shorts-vintage-back.png",
+              title: "Quantity",
+              values: ["120 Capsules"],
+            },
+          ],
+          variants: [
+            {
+              title: "120 Capsules",
+              sku: "BEEF-LIVER-120",
+              options: {
+                "Quantity": "120 Capsules",
+              },
+              prices: [
+                {
+                  amount: 19.99,
+                  currency_code: "usd",
+                },
+              ],
+            },
+          ],
+          sales_channels: [
+            {
+              id: defaultSalesChannel[0].id,
+            },
+          ],
+        },
+        {
+          title: "Glycine",
+          category_ids: [
+            categoryResult.find((cat) => cat.name === "Nootropics & Supplements")!.id,
+          ],
+          description: "Pure pharmaceutical-grade Glycine powder. Essential for sleep quality, joint support, and skin health.",
+          handle: "glycine",
+          weight: 500,
+          status: ProductStatus.PUBLISHED,
+          shipping_profile_id: shippingProfile.id,
+          metadata: {
+            is_addon: true,
+            was_price: 21.99,
+            hook_text: "The sleep-and-skin amino acid your stack is missing."
+          },
+          images: [
+            {
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
+            },
+          ],
+          options: [
+            {
+              title: "Quantity",
+              values: ["500g"],
+            },
+          ],
+          variants: [
+            {
+              title: "500g",
+              sku: "GLYCINE-500G",
+              options: {
+                "Quantity": "500g",
+              },
+              prices: [
+                {
+                  amount: 17.99,
+                  currency_code: "usd",
+                },
+              ],
+            },
+          ],
+          sales_channels: [
+            {
+              id: defaultSalesChannel[0].id,
+            },
+          ],
+        },
+        {
+          title: "CoQ10",
+          category_ids: [
+            categoryResult.find((cat) => cat.name === "Nootropics & Supplements")!.id,
+          ],
+          description: "Coenzyme Q10 (CoQ10) is a crucial antioxidant necessary for cellular energy production and mitochondrial function.",
+          handle: "coq10",
+          weight: 150,
+          status: ProductStatus.PUBLISHED,
+          shipping_profile_id: shippingProfile.id,
+          metadata: {
+            is_addon: true,
+            was_price: 23.99,
+            hook_text: "Mitochondrial fuel for energy that actually lasts."
+          },
+          images: [
+            {
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
+            },
+          ],
+          options: [
+            {
+              title: "Quantity",
+              values: ["60 Softgels"],
+            },
+          ],
+          variants: [
+            {
+              title: "60 Softgels",
+              sku: "COQ10-60",
+              options: {
+                "Quantity": "60 Softgels",
+              },
+              prices: [
+                {
+                  amount: 18.99,
+                  currency_code: "usd",
+                },
+              ],
+            },
+          ],
+          sales_channels: [
+            {
+              id: defaultSalesChannel[0].id,
+            },
+          ],
+        },
+        {
+          title: "NMN",
+          category_ids: [
+            categoryResult.find((cat) => cat.name === "Nootropics & Supplements")!.id,
+          ],
+          description: "Nicotinamide Mononucleotide (NMN) is a direct precursor to NAD+, assisting cellular energy, repair, and longevity.",
+          handle: "nmn",
+          weight: 100,
+          status: ProductStatus.PUBLISHED,
+          shipping_profile_id: shippingProfile.id,
+          metadata: {
+            is_addon: true,
+            was_price: 28.99,
+            hook_text: "The NAD+ booster everyone's stacking for longevity."
+          },
+          images: [
+            {
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
+            },
+          ],
+          options: [
+            {
+              title: "Quantity",
+              values: ["30g Powder"],
+            },
+          ],
+          variants: [
+            {
+              title: "30g Powder",
+              sku: "NMN-30G",
+              options: {
+                "Quantity": "30g Powder",
+              },
+              prices: [
+                {
+                  amount: 22.99,
+                  currency_code: "usd",
+                },
+              ],
+            },
+          ],
+          sales_channels: [
+            {
+              id: defaultSalesChannel[0].id,
+            },
+          ],
+        },
+        {
+          title: "Protein + Creatine Gummies",
+          category_ids: [
+            categoryResult.find((cat) => cat.name === "Gummies & Functional Foods")!.id,
+          ],
+          description: "Delicious functional gummies packed with high-quality protein and creatine monohydrate.",
+          handle: "protein-creatine-gummies",
+          weight: 200,
+          status: ProductStatus.PUBLISHED,
+          shipping_profile_id: shippingProfile.id,
+          metadata: {
+            is_addon: true,
+            was_price: 19.99,
+            hook_text: "Gains in gummy form. No shaker, no excuses."
+          },
+          images: [
+            {
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
+            },
+          ],
+          options: [
+            {
+              title: "Flavor",
+              values: ["Sour Cherry"],
+            },
+          ],
+          variants: [
+            {
+              title: "Sour Cherry",
+              sku: "GUMMY-CREATINE-CHERRY",
+              options: {
+                "Flavor": "Sour Cherry",
+              },
+              prices: [
+                {
+                  amount: 16.99,
+                  currency_code: "usd",
+                },
+              ],
+            },
+          ],
+          sales_channels: [
+            {
+              id: defaultSalesChannel[0].id,
+            },
+          ],
+        },
+        {
+          title: "L. Reuteri Probiotic",
+          category_ids: [
+            categoryResult.find((cat) => cat.name === "Nootropics & Supplements")!.id,
+          ],
+          description: "Specialized Lactobacillus reuteri strain targeting gut microbiome and natural oxytocin support.",
+          handle: "l-reuteri",
+          weight: 150,
+          status: ProductStatus.PUBLISHED,
+          shipping_profile_id: shippingProfile.id,
+          metadata: {
+            is_addon: true,
+            was_price: 25.99,
+            hook_text: "Gut health meets feel-good hormones — supports natural oxytocin production."
+          },
+          images: [
+            {
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
+            },
+          ],
+          options: [
+            {
+              title: "Quantity",
+              values: ["60 Capsules"],
+            },
+          ],
+          variants: [
+            {
+              title: "60 Capsules",
+              sku: "L-REUTERI-60",
+              options: {
+                "Quantity": "60 Capsules",
+              },
+              prices: [
+                {
+                  amount: 20.99,
+                  currency_code: "usd",
+                },
+              ],
+            },
+          ],
+          sales_channels: [
+            {
+              id: defaultSalesChannel[0].id,
+            },
+          ],
+        },
+        {
+          title: "Copper Peptide Serum",
+          category_ids: [
+            categoryResult.find((cat) => cat.name === "Add-ons & Accessories")!.id,
+          ],
+          description: "Premium GHK-Cu Copper Peptide facial serum designed for skin elasticity and anti-aging firmness.",
+          handle: "ghk-cu-serum",
+          weight: 150,
+          status: ProductStatus.PUBLISHED,
+          shipping_profile_id: shippingProfile.id,
+          metadata: {
+            is_addon: true,
+            was_price: 89.95,
+            hook_text: "Your peptides, but for your skin — visible firmness and glow."
+          },
+          images: [
+            {
+              url: "https://medusa-public-images.s3.eu-west-1.amazonaws.com/tee-black-front.png",
             },
           ],
           options: [
             {
               title: "Size",
-              values: ["S", "M", "L", "XL"],
+              values: ["30ml"],
             },
           ],
           variants: [
             {
-              title: "S",
-              sku: "SHORTS-S",
+              title: "30ml",
+              sku: "GHK-CU-30ML",
               options: {
-                Size: "S",
+                "Size": "30ml",
               },
               prices: [
                 {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "M",
-              sku: "SHORTS-M",
-              options: {
-                Size: "M",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "L",
-              sku: "SHORTS-L",
-              options: {
-                Size: "L",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
-                  currency_code: "usd",
-                },
-              ],
-            },
-            {
-              title: "XL",
-              sku: "SHORTS-XL",
-              options: {
-                Size: "XL",
-              },
-              prices: [
-                {
-                  amount: 10,
-                  currency_code: "eur",
-                },
-                {
-                  amount: 15,
+                  amount: 69.95,
                   currency_code: "usd",
                 },
               ],
@@ -893,9 +875,10 @@ export default async function seedDemoData({ container }: ExecArgs) {
       ],
     },
   });
-  logger.info("Finished seeding product data.");
 
-  logger.info("Seeding inventory levels.");
+  logger.info("Finished seeding client product data.");
+
+  logger.info("Seeding inventory levels...");
 
   const { data: inventoryItems } = await query.graph({
     entity: "inventory_item",
@@ -918,5 +901,60 @@ export default async function seedDemoData({ container }: ExecArgs) {
     },
   });
 
-  logger.info("Finished seeding inventory levels data.");
+  logger.info("Finished seeding inventory levels.");
+
+  // Seeding custom goals and guides
+  logger.info("Seeding custom guides and goal recommendations...");
+
+  const { data: seededProducts } = await query.graph({
+    entity: "product",
+    fields: ["id", "handle"],
+  });
+
+  const guideService = container.resolve("guide");
+  const recommendationService = container.resolve("recommendation");
+
+  // Create default guides
+  await guideService.createGuides([
+    {
+      title: "BPC-157 Reconstruction & Dosing Guide",
+      handle: "bpc-157-dosing-guide",
+      pdf_url: "https://rlaustralia.com/guides/bpc157-guide.pdf",
+      is_gated: true,
+      description: "The complete step-by-step clinical protocol on reconstructing, mixing, and dosing BPC-157."
+    },
+    {
+      title: "Introduction to Anti-Inflammatory Peptides",
+      handle: "intro-anti-inflammatory-peptides",
+      pdf_url: "https://rlaustralia.com/guides/anti-inflammation.pdf",
+      is_gated: false,
+      description: "A free introduction to how peptides target and reduce systemic inflammation in the body."
+    }
+  ]);
+
+  // Create goal recommendations linking to real product IDs
+  const bpc157 = seededProducts.find((p: any) => p.handle === "bpc-157")?.id || "";
+  const tb500 = seededProducts.find((p: any) => p.handle === "tb-500")?.id || "";
+  const kpv = seededProducts.find((p: any) => p.handle === "kpv")?.id || "";
+  const nmn = seededProducts.find((p: any) => p.handle === "nmn")?.id || "";
+
+  await recommendationService.createGoalRecommendations([
+    {
+      goal_name: "recovery",
+      description: "Accelerate tissue, muscle, and ligament repair with BPC-157 and TB-500 synergy.",
+      product_ids: [bpc157, tb500].filter(Boolean)
+    },
+    {
+      goal_name: "anti-inflammation",
+      description: "Reduce systemic and gut-related inflammation with KPV and BPC-157 combination.",
+      product_ids: [kpv, bpc157].filter(Boolean)
+    },
+    {
+      goal_name: "longevity",
+      description: "Boost cellular energy levels, repair DNA damage, and increase vitality with NMN.",
+      product_ids: [nmn].filter(Boolean)
+    }
+  ] as any);
+
+  logger.info("Finished seeding custom client modules.");
 }
