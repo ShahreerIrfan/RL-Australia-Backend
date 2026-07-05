@@ -11,7 +11,7 @@ module.exports = defineConfig({
       },
       pool: {
         min: 0,
-        max: 1,
+        max: 15,
         idleTimeoutMillis: 5000,
         acquireTimeoutMillis: 60000,
       }
@@ -33,6 +33,9 @@ module.exports = defineConfig({
     },
     {
       resolve: "./src/modules/recommendation",
+    },
+    {
+      resolve: "./src/modules/car",
     },
   ]
 })

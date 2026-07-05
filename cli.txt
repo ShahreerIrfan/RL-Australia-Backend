@@ -1,0 +1,1 @@
+npx medusa db:migrate
