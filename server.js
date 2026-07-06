@@ -229,7 +229,7 @@ async function initDb() {
 initDb()
 
 // 1. Get Categories (for storefront and admin select options)
-app.get(["/store/categories", "/store/product-categories", "/admin/categories"], async (req, res) => {
+app.get(["/store/categories", "/store/product-categories", "/admin/categories", "/admin/product-categories"], async (req, res) => {
     try {
         const result = await pool.query("SELECT id, name, slug, description, image_url, is_active, sort_order FROM rl_categories ORDER BY sort_order ASC, name ASC")
         const categories = result.rows.map(row => ({
@@ -359,8 +359,8 @@ app.post("/admin/products", async (req, res) => {
     }
 })
 
-// 4. Admin: Update Product
-app.put("/admin/products/:id", async (req, res) => {
+// 4. Admin: Update Product (POST & PUT)
+const updateProduct = async (req, res) => {
     try {
         const { id } = req.params
         const {
@@ -407,7 +407,9 @@ app.put("/admin/products/:id", async (req, res) => {
         console.error("Update product error:", error.message)
         res.status(500).json({ message: "Internal server error" })
     }
-})
+}
+app.post("/admin/products/:id", updateProduct)
+app.put("/admin/products/:id", updateProduct)
 
 // 5. Admin: Delete Product
 app.delete("/admin/products/:id", async (req, res) => {
@@ -739,7 +741,7 @@ app.post("/store/carts/:id/complete", async (req, res) => {
 // ============ CATEGORY CRUD ============
 
 // Create Category
-app.post("/admin/categories", async (req, res) => {
+const createCategory = async (req, res) => {
     try {
         const { name, slug, description } = req.body
         if (!name) return res.status(400).json({ message: "Category name is required" })
@@ -748,15 +750,17 @@ app.post("/admin/categories", async (req, res) => {
             "INSERT INTO rl_categories (id, name, slug, description, is_active, sort_order) VALUES (gen_random_uuid(), $1, $2, $3, true, 0) RETURNING *",
             [name, generatedSlug, description || ""]
         )
-        res.status(201).json({ category: result.rows[0] })
+        res.status(201).json({ category: result.rows[0], product_category: { id: result.rows[0].id, name: result.rows[0].name, handle: result.rows[0].slug } })
     } catch (err) {
         console.error("Create category error:", err.message)
         res.status(500).json({ message: "Failed to create category" })
     }
-})
+}
+app.post("/admin/categories", createCategory)
+app.post("/admin/product-categories", createCategory)
 
-// Update Category
-app.put("/admin/categories/:id", async (req, res) => {
+// Update Category (POST & PUT)
+const updateCategory = async (req, res) => {
     try {
         const { name, slug, description } = req.body
         if (!name) return res.status(400).json({ message: "Category name is required" })
@@ -766,15 +770,19 @@ app.put("/admin/categories/:id", async (req, res) => {
             [name, generatedSlug, description || "", req.params.id]
         )
         if (result.rows.length === 0) return res.status(404).json({ message: "Category not found" })
-        res.status(200).json({ category: result.rows[0] })
+        res.status(200).json({ category: result.rows[0], product_category: { id: result.rows[0].id, name: result.rows[0].name, handle: result.rows[0].slug } })
     } catch (err) {
         console.error("Update category error:", err.message)
         res.status(500).json({ message: "Failed to update category" })
     }
-})
+}
+app.post("/admin/categories/:id", updateCategory)
+app.post("/admin/product-categories/:id", updateCategory)
+app.put("/admin/categories/:id", updateCategory)
+app.put("/admin/product-categories/:id", updateCategory)
 
 // Delete Category
-app.delete("/admin/categories/:id", async (req, res) => {
+const deleteCategory = async (req, res) => {
     try {
         const result = await pool.query("DELETE FROM rl_categories WHERE id = $1 RETURNING *", [req.params.id])
         if (result.rows.length === 0) return res.status(404).json({ message: "Category not found" })
@@ -783,7 +791,9 @@ app.delete("/admin/categories/:id", async (req, res) => {
         console.error("Delete category error:", err.message)
         res.status(500).json({ message: "Failed to delete category" })
     }
-})
+}
+app.delete("/admin/categories/:id", deleteCategory)
+app.delete("/admin/product-categories/:id", deleteCategory)
 
 // ============ START ============
 
