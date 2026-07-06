@@ -6,13 +6,16 @@ export function hashPassword(password: string): string {
   return crypto.createHash("sha256").update(password + JWT_SECRET).digest("hex")
 }
 
-export function generateToken(payload: Record<string, any>): string {
+export function generateToken(payload: Record<string, any>, expiresIn?: string): string {
+  const isInfinity = expiresIn === "7300d"
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url")
   const body = Buffer.from(
     JSON.stringify({
       ...payload,
       iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 86400 * 7, // 7 days
+      exp: isInfinity 
+        ? Math.floor(Date.now() / 1000) + 86400 * 365 * 20 // 20 years
+        : Math.floor(Date.now() / 1000) + 86400 * 7, // 7 days
     })
   ).toString("base64url")
   const signature = crypto

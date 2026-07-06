@@ -1,6 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import pool from "../../lib/db"
-import { hashPassword, generateToken } from "../../lib/auth"
+import pool from "../../../lib/db"
+import { hashPassword, generateToken } from "../../../lib/auth"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
