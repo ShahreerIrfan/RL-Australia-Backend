@@ -24,6 +24,9 @@ module.exports = defineConfig({
       cookieSecret: process.env.COOKIE_SECRET || "supersecret",
     }
   },
+  admin: {
+    disable: true
+  },
   modules: [
     {
       resolve: "./src/modules/saved-stack",
