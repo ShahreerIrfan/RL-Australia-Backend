@@ -40,6 +40,8 @@ COPY --from=base /app/medusa-config.ts /app/medusa-config.ts
 COPY --from=base /app/instrumentation.ts /app/instrumentation.ts
 COPY --from=base /app/tsconfig.json /app/tsconfig.json
 COPY --from=base /app/src /app/src
+COPY --from=base /app/server.js /app/server.js
+COPY --from=base /app/seed_db.js /app/seed_db.js
 
 EXPOSE 9000
 
