@@ -22,7 +22,8 @@ RUN \
 # Copy all source files
 COPY . .
 
-# Build typescript codebase
+# Build typescript codebase and admin dashboard
+ENV MEDUSA_ADMIN_BUILD=true
 RUN npm run build
 
 # Production runner stage
