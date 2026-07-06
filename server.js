@@ -214,10 +214,12 @@ async function initDb() {
                 price NUMERIC(10,2) NOT NULL,
                 original_price NUMERIC(10,2),
                 stock_quantity INTEGER DEFAULT 0,
+                weight VARCHAR(100),
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             )
         `)
+        await pool.query("ALTER TABLE rl_product_variants ADD COLUMN IF NOT EXISTS weight VARCHAR(100)")
         
         // Index on product_id for fast lookups
         await pool.query("CREATE INDEX IF NOT EXISTS idx_rl_product_variants_product_id ON rl_product_variants(product_id)")
@@ -338,6 +340,7 @@ app.get("/store/products", async (req, res) => {
                     id: v.id,
                     sku: v.sku || "",
                     title: v.title,
+                    weight: v.weight || "",
                     inventory_quantity: v.stock_quantity || 0,
                     options: [],
                     calculated_price: {
@@ -410,30 +413,32 @@ app.post("/admin/products", async (req, res) => {
         if (Array.isArray(variants) && variants.length > 0) {
             for (const v of variants) {
                 await pool.query(
-                    `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity)
-                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity, weight)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
                     [
                         product.id,
                         v.title,
                         Number(v.price),
                         v.original_price ? Number(v.original_price) : null,
                         v.sku || "",
-                        v.stock_quantity ? parseInt(v.stock_quantity, 10) : 0
+                        v.stock_quantity ? parseInt(v.stock_quantity, 10) : 0,
+                        v.weight || ""
                     ]
                 )
             }
         } else {
             // Default backward compatible variant
             await pool.query(
-                `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity)
-                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity, weight)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
                 [
                     product.id,
                     "Single Vial",
                     Number(price),
                     original_price ? Number(original_price) : null,
                     sku || "",
-                    stock_quantity ? parseInt(stock_quantity, 10) : 0
+                    stock_quantity ? parseInt(stock_quantity, 10) : 0,
+                    ""
                 ]
             )
         }
@@ -497,30 +502,32 @@ const updateProduct = async (req, res) => {
         if (Array.isArray(variants) && variants.length > 0) {
             for (const v of variants) {
                 await pool.query(
-                    `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity)
-                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity, weight)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
                     [
                         id,
                         v.title,
                         Number(v.price),
                         v.original_price ? Number(v.original_price) : null,
                         v.sku || "",
-                        v.stock_quantity ? parseInt(v.stock_quantity, 10) : 0
+                        v.stock_quantity ? parseInt(v.stock_quantity, 10) : 0,
+                        v.weight || ""
                     ]
                 )
             }
         } else {
             // Default backward compatible variant
             await pool.query(
-                `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity)
-                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity, weight)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
                 [
                     id,
                     "Single Vial",
                     Number(price),
                     original_price ? Number(original_price) : null,
                     sku || "",
-                    stock_quantity ? parseInt(stock_quantity, 10) : 0
+                    stock_quantity ? parseInt(stock_quantity, 10) : 0,
+                    ""
                 ]
             )
         }
