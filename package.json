@@ -24,7 +24,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.4.2",
     "@medusajs/admin-sdk": "2.16.0",
     "@medusajs/cli": "2.16.0",
     "@medusajs/framework": "2.16.0",
