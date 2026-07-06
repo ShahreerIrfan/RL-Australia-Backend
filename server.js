@@ -204,6 +204,24 @@ async function initDb() {
         // Ensure image_gallery column exists in rl_products
         await pool.query("ALTER TABLE rl_products ADD COLUMN IF NOT EXISTS image_gallery text[]")
         
+        // Ensure rl_product_variants table exists
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS rl_product_variants (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                product_id UUID REFERENCES rl_products(id) ON DELETE CASCADE,
+                title VARCHAR(100) NOT NULL,
+                sku VARCHAR(100),
+                price NUMERIC(10,2) NOT NULL,
+                original_price NUMERIC(10,2),
+                stock_quantity INTEGER DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        `)
+        
+        // Index on product_id for fast lookups
+        await pool.query("CREATE INDEX IF NOT EXISTS idx_rl_product_variants_product_id ON rl_product_variants(product_id)")
+        
         const check = await pool.query("SELECT COUNT(*) FROM rl_categories")
         if (parseInt(check.rows[0].count, 10) === 0) {
             console.log("Seeding default categories in rl_categories...")
@@ -302,7 +320,43 @@ app.get("/store/products", async (req, res) => {
         queryStr += " ORDER BY p.created_at DESC"
         
         const result = await pool.query(queryStr, params)
-        const products = result.rows.map(mapRowToProduct)
+        const productRows = result.rows
+        
+        // Fetch variants for all returned products
+        const productIds = productRows.map(p => p.id)
+        let variantsMap = {}
+        if (productIds.length > 0) {
+            const varsResult = await pool.query(
+                "SELECT * FROM rl_product_variants WHERE product_id = ANY($1) ORDER BY price ASC",
+                [productIds]
+            )
+            for (const v of varsResult.rows) {
+                if (!variantsMap[v.product_id]) {
+                    variantsMap[v.product_id] = []
+                }
+                variantsMap[v.product_id].push({
+                    id: v.id,
+                    sku: v.sku || "",
+                    title: v.title,
+                    inventory_quantity: v.stock_quantity || 0,
+                    options: [],
+                    calculated_price: {
+                        calculated_amount: Number(v.price),
+                        original_amount: Number(v.original_price || v.price),
+                        currency_code: "aud",
+                        calculated_price: { price_list_type: null }
+                    }
+                })
+            }
+        }
+
+        const products = productRows.map(row => {
+            const mapped = mapRowToProduct(row)
+            if (variantsMap[row.id] && variantsMap[row.id].length > 0) {
+                mapped.variants = variantsMap[row.id]
+            }
+            return mapped
+        })
         
         res.status(200).json({ products, count: products.length, limit: 100, offset: 0 })
     } catch (error) {
@@ -318,7 +372,7 @@ app.post("/admin/products", async (req, res) => {
             name, slug, description, short_description, price, original_price, 
             discount_percent, image_url, sku, stock_quantity, category_id, 
             dosage, purity, molecular_weight, molecular_formula, is_active, is_featured,
-            image_gallery
+            image_gallery, variants
         } = req.body
 
         if (!name || !price) {
@@ -350,7 +404,41 @@ app.post("/admin/products", async (req, res) => {
         ]
 
         const result = await pool.query(queryStr, values)
-        res.status(201).json({ message: "Product created successfully", product: result.rows[0] })
+        const product = result.rows[0]
+
+        // Create variants in the separate table
+        if (Array.isArray(variants) && variants.length > 0) {
+            for (const v of variants) {
+                await pool.query(
+                    `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity)
+                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [
+                        product.id,
+                        v.title,
+                        Number(v.price),
+                        v.original_price ? Number(v.original_price) : null,
+                        v.sku || "",
+                        v.stock_quantity ? parseInt(v.stock_quantity, 10) : 0
+                    ]
+                )
+            }
+        } else {
+            // Default backward compatible variant
+            await pool.query(
+                `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [
+                    product.id,
+                    "Single Vial",
+                    Number(price),
+                    original_price ? Number(original_price) : null,
+                    sku || "",
+                    stock_quantity ? parseInt(stock_quantity, 10) : 0
+                ]
+            )
+        }
+
+        res.status(201).json({ message: "Product created successfully", product })
     } catch (error) {
         console.error("Create product error:", error.message)
         res.status(500).json({ message: "Internal server error" })
@@ -365,7 +453,7 @@ const updateProduct = async (req, res) => {
             name, slug, description, short_description, price, original_price, 
             discount_percent, image_url, sku, stock_quantity, category_id, 
             dosage, purity, molecular_weight, molecular_formula, is_active, is_featured,
-            image_gallery
+            image_gallery, variants
         } = req.body
 
         if (!name || !price) {
@@ -400,7 +488,44 @@ const updateProduct = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({ message: "Product not found" })
         }
-        res.status(200).json({ message: "Product updated successfully", product: result.rows[0] })
+        const product = result.rows[0]
+
+        // Update variants: clear existing first
+        await pool.query("DELETE FROM rl_product_variants WHERE product_id = $1", [id])
+        
+        // Insert new variant list
+        if (Array.isArray(variants) && variants.length > 0) {
+            for (const v of variants) {
+                await pool.query(
+                    `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity)
+                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [
+                        id,
+                        v.title,
+                        Number(v.price),
+                        v.original_price ? Number(v.original_price) : null,
+                        v.sku || "",
+                        v.stock_quantity ? parseInt(v.stock_quantity, 10) : 0
+                    ]
+                )
+            }
+        } else {
+            // Default backward compatible variant
+            await pool.query(
+                `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [
+                    id,
+                    "Single Vial",
+                    Number(price),
+                    original_price ? Number(original_price) : null,
+                    sku || "",
+                    stock_quantity ? parseInt(stock_quantity, 10) : 0
+                ]
+            )
+        }
+
+        res.status(200).json({ message: "Product updated successfully", product })
     } catch (error) {
         console.error("Update product error:", error.message)
         res.status(500).json({ message: "Internal server error" })
@@ -507,29 +632,42 @@ async function buildCartResponse(cartId) {
     const cart = cartRes.rows[0]
 
     const itemsRes = await pool.query(`
-        SELECT ci.*, p.name, p.slug, p.image_url, p.price as product_price, p.original_price
+        SELECT ci.*, p.name as product_name, p.slug, p.image_url, p.price as product_price, p.original_price
         FROM rl_cart_items ci
         JOIN rl_products p ON ci.product_id = p.id
         WHERE ci.cart_id = $1
         ORDER BY ci.created_at ASC
     `, [cartId])
 
-    const items = itemsRes.rows.map(row => ({
-        id: row.id,
-        title: row.name,
-        subtitle: null,
-        thumbnail: row.image_url || "/assets/peptide-vial.png",
-        variant_id: row.variant_id || row.product_id,
-        product_id: row.product_id,
-        product_handle: row.slug,
-        product_title: row.name,
-        quantity: row.quantity,
-        unit_price: parseFloat(row.unit_price),
-        total: parseFloat(row.unit_price) * row.quantity,
-        original_total: parseFloat(row.original_price || row.unit_price) * row.quantity,
-        variant: { id: row.variant_id || row.product_id, title: "Default" },
-        product: { id: row.product_id, title: row.name, handle: row.slug, thumbnail: row.image_url }
-    }))
+    const variantIds = itemsRes.rows.map(row => row.variant_id).filter(id => id && id !== row.product_id)
+    let variantsMap = {}
+    if (variantIds.length > 0) {
+        const varsRes = await pool.query("SELECT id, title FROM rl_product_variants WHERE id = ANY($1)", [variantIds])
+        for (const v of varsRes.rows) {
+            variantsMap[v.id] = v.title
+        }
+    }
+
+    const items = itemsRes.rows.map(row => {
+        const variantTitle = variantsMap[row.variant_id] || "Default"
+        const fullTitle = variantTitle !== "Default" ? `${row.product_name} (${variantTitle})` : row.product_name
+        return {
+            id: row.id,
+            title: fullTitle,
+            subtitle: variantTitle !== "Default" ? variantTitle : null,
+            thumbnail: row.image_url || "/assets/peptide-vial.png",
+            variant_id: row.variant_id || row.product_id,
+            product_id: row.product_id,
+            product_handle: row.slug,
+            product_title: row.product_name,
+            quantity: row.quantity,
+            unit_price: parseFloat(row.unit_price),
+            total: parseFloat(row.unit_price) * row.quantity,
+            original_total: parseFloat(row.original_price || row.unit_price) * row.quantity,
+            variant: { id: row.variant_id || row.product_id, title: variantTitle },
+            product: { id: row.product_id, title: row.product_name, handle: row.slug, thumbnail: row.image_url }
+        }
+    })
 
     const subtotal = items.reduce((sum, i) => sum + i.total, 0)
     const shippingTotal = parseFloat(cart.shipping_total) || 0
@@ -610,14 +748,28 @@ app.post("/store/carts/:id", async (req, res) => {
 app.post("/store/carts/:id/line-items", async (req, res) => {
     try {
         const { variant_id, quantity } = req.body
-        const productId = variant_id // in our system variant_id = product_id
-        const product = await pool.query("SELECT price FROM rl_products WHERE id = $1", [productId])
-        if (product.rows.length === 0) return res.status(404).json({ message: "Product not found" })
+        
+        let price = 0
+        let productId = null
+        
+        // 1. Check if variant_id exists in rl_product_variants
+        const variantCheck = await pool.query("SELECT * FROM rl_product_variants WHERE id = $1", [variant_id])
+        if (variantCheck.rows.length > 0) {
+            const variant = variantCheck.rows[0]
+            price = Number(variant.price)
+            productId = variant.product_id
+        } else {
+            // 2. Fall back to product_id
+            productId = variant_id
+            const product = await pool.query("SELECT price FROM rl_products WHERE id = $1", [productId])
+            if (product.rows.length === 0) return res.status(404).json({ message: "Product not found" })
+            price = Number(product.rows[0].price)
+        }
 
-        // Check if item already exists in cart
+        // Check if item already exists in cart with this specific variant ID
         const existing = await pool.query(
-            "SELECT id, quantity FROM rl_cart_items WHERE cart_id = $1 AND product_id = $2",
-            [req.params.id, productId]
+            "SELECT id, quantity FROM rl_cart_items WHERE cart_id = $1 AND product_id = $2 AND variant_id = $3",
+            [req.params.id, productId, variant_id]
         )
         if (existing.rows.length > 0) {
             await pool.query(
@@ -627,7 +779,7 @@ app.post("/store/carts/:id/line-items", async (req, res) => {
         } else {
             await pool.query(
                 "INSERT INTO rl_cart_items (cart_id, product_id, variant_id, quantity, unit_price) VALUES ($1, $2, $3, $4, $5)",
-                [req.params.id, productId, variant_id, quantity || 1, product.rows[0].price]
+                [req.params.id, productId, variant_id, quantity || 1, price]
             )
         }
         const cart = await buildCartResponse(req.params.id)
