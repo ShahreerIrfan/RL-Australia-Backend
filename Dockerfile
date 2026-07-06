@@ -37,6 +37,7 @@ COPY --from=base /app/node_modules /app/node_modules
 COPY --from=base /app/package.json /app/package.json
 COPY --from=base /app/medusa-config.ts /app/medusa-config.ts
 COPY --from=base /app/instrumentation.ts /app/instrumentation.ts
+COPY --from=base /app/tsconfig.json /app/tsconfig.json
 COPY --from=base /app/src /app/src
 
 EXPOSE 9000
