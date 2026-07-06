@@ -18,11 +18,9 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 
 // Middleware
 app.use(cors({
-    origin: [
-        "http://localhost:3000",
-        "http://localhost:8000",
-        process.env.STORE_CORS || ""
-    ].filter(Boolean),
+    origin: (origin, callback) => {
+        callback(null, true)
+    },
     credentials: true,
 }))
 app.use(express.json({ limit: "50mb" }))
