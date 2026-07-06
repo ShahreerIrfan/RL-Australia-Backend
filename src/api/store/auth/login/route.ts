@@ -15,7 +15,17 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       email.toLowerCase() === (process.env.ADMIN_EMAIL || "").toLowerCase() &&
       password === process.env.ADMIN_PASSWORD
     ) {
-      const token = generateToken({ email: email.toLowerCase(), role: "admin", id: "admin" })
+      // Fetch actual admin user ID from database to authorize core Medusa admin API calls
+      const adminResult = await pool.query('SELECT id FROM "user" WHERE email = $1', [email.toLowerCase()])
+      const adminId = adminResult.rows[0]?.id || "admin"
+
+      const token = generateToken({
+        email: email.toLowerCase(),
+        role: "admin",
+        id: "admin",
+        actor_id: adminId,
+        actor_type: "user"
+      })
       return res.status(200).json({
         message: "Login successful",
         token,
