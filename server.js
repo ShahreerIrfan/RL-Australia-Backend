@@ -440,7 +440,9 @@ app.post("/admin/upload", async (req, res) => {
         const buffer = Buffer.from(fileData, "base64")
         fs.writeFileSync(filePath, buffer)
 
-        const fileUrl = `http://localhost:${PORT}/uploads/${cleanName}`
+        const protocol = req.headers["x-forwarded-proto"] || req.protocol
+        const host = req.headers["x-forwarded-host"] || req.headers.host
+        const fileUrl = `${protocol}://${host}/uploads/${cleanName}`
         res.status(200).json({ url: fileUrl })
     } catch (error) {
         console.error("Upload error:", error.message)
