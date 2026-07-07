@@ -722,7 +722,9 @@ async function buildCartResponse(cartId) {
         ORDER BY ci.created_at ASC
     `, [cartId])
 
-    const variantIds = itemsRes.rows.map(row => row.variant_id).filter(id => id && id !== row.product_id)
+    const variantIds = itemsRes.rows
+        .filter(row => row.variant_id && row.variant_id !== row.product_id)
+        .map(row => row.variant_id)
     let variantsMap = {}
     if (variantIds.length > 0) {
         const varsRes = await pool.query("SELECT id, title FROM rl_product_variants WHERE id = ANY($1)", [variantIds])
