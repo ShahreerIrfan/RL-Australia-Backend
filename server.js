@@ -317,15 +317,20 @@ app.get("/store/products", async (req, res) => {
             parsedId = parsedId[0]
         }
 
+        let parsedCategoryId = category_id || req.query['category_id[]'] || req.query['category_id']
+        if (Array.isArray(parsedCategoryId)) {
+            parsedCategoryId = parsedCategoryId[0]
+        }
+
         if (handle) {
             queryStr += " WHERE p.slug = $1"
             params.push(handle)
         } else if (parsedId) {
             queryStr += " WHERE p.id = $1"
             params.push(parsedId)
-        } else if (category_id) {
+        } else if (parsedCategoryId) {
             queryStr += " WHERE p.category_id = $1"
-            params.push(category_id)
+            params.push(parsedCategoryId)
         }
         queryStr += " ORDER BY p.created_at DESC"
         
