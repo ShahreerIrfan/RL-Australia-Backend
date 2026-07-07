@@ -660,6 +660,15 @@ async function initCartTables() {
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         `)
+        // Apply alterations to support legacy PostgreSQL schemas
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS email TEXT")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS billing_address JSONB DEFAULT '{}'")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS region_id TEXT DEFAULT 'reg_au'")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS currency_code TEXT DEFAULT 'aud'")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_method TEXT")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_total NUMERIC(10,2) DEFAULT 0")
+
         await pool.query(`
             CREATE TABLE IF NOT EXISTS rl_cart_items (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -671,6 +680,9 @@ async function initCartTables() {
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         `)
+        await pool.query("ALTER TABLE rl_cart_items ADD COLUMN IF NOT EXISTS variant_id TEXT")
+        await pool.query("ALTER TABLE rl_cart_items ADD COLUMN IF NOT EXISTS unit_price NUMERIC(10,2) DEFAULT 0")
+
         await pool.query(`
             CREATE TABLE IF NOT EXISTS rl_orders (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -685,6 +697,11 @@ async function initCartTables() {
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         `)
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS cart_id UUID")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS email TEXT")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_total NUMERIC(10,2) DEFAULT 0")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'")
     } catch (err) {
         console.error("Cart tables init error:", err.message)
     }
