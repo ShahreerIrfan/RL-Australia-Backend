@@ -305,16 +305,24 @@ function mapRowToProduct(row) {
 // 2. Get Products (storefront listing and details filtering)
 app.get("/store/products", async (req, res) => {
     try {
-        const { handle, category_id } = req.query
+        const { handle, category_id, id } = req.query
         let queryStr = `
             SELECT p.*, c.name as category_name 
             FROM rl_products p
             LEFT JOIN rl_categories c ON p.category_id = c.id
         `
         const params = []
+        let parsedId = id
+        if (Array.isArray(parsedId)) {
+            parsedId = parsedId[0]
+        }
+
         if (handle) {
             queryStr += " WHERE p.slug = $1"
             params.push(handle)
+        } else if (parsedId) {
+            queryStr += " WHERE p.id = $1"
+            params.push(parsedId)
         } else if (category_id) {
             queryStr += " WHERE p.category_id = $1"
             params.push(category_id)
@@ -364,6 +372,52 @@ app.get("/store/products", async (req, res) => {
         res.status(200).json({ products, count: products.length, limit: 100, offset: 0 })
     } catch (error) {
         console.error("Get products error:", error.message)
+        res.status(500).json({ message: "Internal server error" })
+    }
+})
+
+app.get("/store/products/:id", async (req, res) => {
+    try {
+        const { id } = req.params
+        const result = await pool.query(
+            `SELECT p.*, c.name as category_name 
+             FROM rl_products p
+             LEFT JOIN rl_categories c ON p.category_id = c.id
+             WHERE p.id = $1`,
+            [id]
+        )
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Product not found" })
+        }
+        
+        const row = result.rows[0]
+        const mapped = mapRowToProduct(row)
+        
+        // Fetch variants for this product
+        const varsResult = await pool.query(
+            "SELECT * FROM rl_product_variants WHERE product_id = $1 ORDER BY price ASC",
+            [id]
+        )
+        if (varsResult.rows.length > 0) {
+            mapped.variants = varsResult.rows.map(v => ({
+                id: v.id,
+                sku: v.sku || "",
+                title: v.title,
+                weight: v.weight || "",
+                inventory_quantity: v.stock_quantity || 0,
+                options: [],
+                calculated_price: {
+                    calculated_amount: Number(v.price),
+                    original_amount: Number(v.original_price || v.price),
+                    currency_code: "aud",
+                    calculated_price: { price_list_type: null }
+                }
+            }))
+        }
+        
+        res.status(200).json({ product: mapped })
+    } catch (error) {
+        console.error("Get product by ID error:", error.message)
         res.status(500).json({ message: "Internal server error" })
     }
 })
