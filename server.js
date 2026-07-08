@@ -1065,6 +1065,18 @@ app.get("/store/orders", async (req, res) => {
     }
 })
 
+// Update Order Status
+app.post("/admin/orders/:id/status", async (req, res) => {
+    try {
+        const { status } = req.body
+        await pool.query("UPDATE rl_orders SET status = $1 WHERE id = $2", [status, req.params.id])
+        res.status(200).json({ message: "Order status updated successfully" })
+    } catch (err) {
+        console.error("Update order status error:", err.message)
+        res.status(500).json({ message: "Failed to update order status" })
+    }
+})
+
 // ============ CATEGORY CRUD ============
 
 // Create Category
