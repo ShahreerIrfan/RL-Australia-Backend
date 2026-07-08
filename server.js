@@ -972,10 +972,11 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         const cart = await buildCartResponse(req.params.id)
         if (!cart) return res.status(404).json({ message: "Cart not found" })
 
-        await pool.query(
-            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        const orderInsertRes = await pool.query(
+            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
             [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {})]
         )
+        const newOrder = orderInsertRes.rows[0]
 
         // Clear cart items
         await pool.query("DELETE FROM rl_cart_items WHERE cart_id = $1", [req.params.id])
@@ -983,7 +984,7 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         res.status(200).json({
             type: "order",
             order: {
-                id: "order_" + Date.now(),
+                id: newOrder.id,
                 status: "confirmed",
                 items: cart.items,
                 subtotal: cart.subtotal,
@@ -995,6 +996,72 @@ app.post("/store/carts/:id/complete", async (req, res) => {
     } catch (err) {
         console.error("Complete cart error:", err.message)
         res.status(500).json({ message: "Failed to complete checkout" })
+    }
+})
+
+// Get Order by ID
+app.get("/store/orders/:id", async (req, res) => {
+    try {
+        let orderRes = await pool.query("SELECT * FROM rl_orders WHERE id = $1", [req.params.id])
+        if (orderRes.rows.length === 0) {
+            orderRes = await pool.query("SELECT * FROM rl_orders WHERE cart_id = $1", [req.params.id])
+        }
+        if (orderRes.rows.length === 0) {
+            return res.status(404).json({ message: "Order not found" })
+        }
+        const o = orderRes.rows[0]
+        res.status(200).json({
+            order: {
+                id: o.id,
+                cart_id: o.cart_id,
+                email: o.email,
+                items: typeof o.items === "string" ? JSON.parse(o.items) : o.items,
+                subtotal: parseFloat(o.subtotal),
+                item_subtotal: parseFloat(o.subtotal),
+                shipping_total: parseFloat(o.shipping_total),
+                shipping_subtotal: parseFloat(o.shipping_total),
+                discount_subtotal: 0,
+                tax_total: 0,
+                total: parseFloat(o.total),
+                status: o.status,
+                shipping_address: typeof o.shipping_address === "string" ? JSON.parse(o.shipping_address) : o.shipping_address,
+                billing_address: typeof o.billing_address === "string" ? JSON.parse(o.billing_address) : o.billing_address,
+                created_at: o.created_at,
+                currency_code: "aud"
+            }
+        })
+    } catch (err) {
+        console.error("Get order error:", err.message)
+        res.status(500).json({ message: "Failed to fetch order" })
+    }
+})
+
+// List Orders
+app.get("/store/orders", async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM rl_orders ORDER BY created_at DESC")
+        const orders = result.rows.map(o => ({
+            id: o.id,
+            cart_id: o.cart_id,
+            email: o.email,
+            items: typeof o.items === "string" ? JSON.parse(o.items) : o.items,
+            subtotal: parseFloat(o.subtotal),
+            item_subtotal: parseFloat(o.subtotal),
+            shipping_total: parseFloat(o.shipping_total),
+            shipping_subtotal: parseFloat(o.shipping_total),
+            discount_subtotal: 0,
+            tax_total: 0,
+            total: parseFloat(o.total),
+            status: o.status,
+            shipping_address: typeof o.shipping_address === "string" ? JSON.parse(o.shipping_address) : o.shipping_address,
+            billing_address: typeof o.billing_address === "string" ? JSON.parse(o.billing_address) : o.billing_address,
+            created_at: o.created_at,
+            currency_code: "aud"
+        }))
+        res.status(200).json({ orders, count: orders.length })
+    } catch (err) {
+        console.error("List orders error:", err.message)
+        res.status(500).json({ message: "Failed to fetch orders" })
     }
 })
 
