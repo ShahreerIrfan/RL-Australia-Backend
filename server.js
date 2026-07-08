@@ -668,6 +668,7 @@ async function initCartTables() {
         await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS currency_code TEXT DEFAULT 'aud'")
         await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_method TEXT")
         await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_total NUMERIC(10,2) DEFAULT 0")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS payment_method TEXT")
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS rl_cart_items (
@@ -948,13 +949,19 @@ app.post("/store/carts/:id/shipping-methods", async (req, res) => {
 
 // Payment Collections
 app.post("/store/payment-collections/:id/payment-sessions", async (req, res) => {
-    const { provider_id } = req.body
-    res.status(200).json({
-        payment_collection: {
-            id: req.params.id,
-            payment_sessions: [{ id: "ps_" + (provider_id || "manual"), provider_id: provider_id || "manual", status: "pending" }]
-        }
-    })
+    try {
+        const { provider_id } = req.body
+        await pool.query("UPDATE rl_carts SET payment_method = $1 WHERE id = $2", [provider_id || "manual", req.params.id])
+        res.status(200).json({
+            payment_collection: {
+                id: req.params.id,
+                payment_sessions: [{ id: "ps_" + (provider_id || "manual"), provider_id: provider_id || "manual", status: "pending" }]
+            }
+        })
+    } catch (err) {
+        console.error("Save payment session error:", err.message)
+        res.status(500).json({ message: "Failed to set payment session" })
+    }
 })
 
 app.get("/store/payment-providers", async (req, res) => {
@@ -972,9 +979,12 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         const cart = await buildCartResponse(req.params.id)
         if (!cart) return res.status(404).json({ message: "Cart not found" })
 
+        const cartDbRes = await pool.query("SELECT payment_method FROM rl_carts WHERE id = $1", [req.params.id])
+        const paymentMethod = cartDbRes.rows[0]?.payment_method || "manual"
+
         const orderInsertRes = await pool.query(
-            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address, order_number) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *",
-            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {}), "ORD-" + Date.now()]
+            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address, order_number, payment_method) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
+            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {}), "ORD-" + Date.now(), paymentMethod]
         )
         const newOrder = orderInsertRes.rows[0]
 
@@ -1027,6 +1037,27 @@ app.get("/store/orders/:id", async (req, res) => {
                 status: o.status,
                 shipping_address: typeof o.shipping_address === "string" ? JSON.parse(o.shipping_address) : o.shipping_address,
                 billing_address: typeof o.billing_address === "string" ? JSON.parse(o.billing_address) : o.billing_address,
+                shipping_methods: [
+                    {
+                        id: "sm_" + o.id,
+                        name: o.shipping_method || "Standard Delivery",
+                        amount: parseFloat(o.shipping_total),
+                        total: parseFloat(o.shipping_total)
+                    }
+                ],
+                payment_collections: [
+                    {
+                        id: "paycol_" + o.id,
+                        payments: [
+                            {
+                                id: "pay_" + o.id,
+                                provider_id: o.payment_method || "manual",
+                                amount: parseFloat(o.total),
+                                created_at: o.created_at
+                            }
+                        ]
+                    }
+                ],
                 created_at: o.created_at,
                 currency_code: "aud"
             }
@@ -1057,6 +1088,27 @@ app.get("/store/orders", async (req, res) => {
             status: o.status,
             shipping_address: typeof o.shipping_address === "string" ? JSON.parse(o.shipping_address) : o.shipping_address,
             billing_address: typeof o.billing_address === "string" ? JSON.parse(o.billing_address) : o.billing_address,
+            shipping_methods: [
+                {
+                    id: "sm_" + o.id,
+                    name: o.shipping_method || "Standard Delivery",
+                    amount: parseFloat(o.shipping_total),
+                    total: parseFloat(o.shipping_total)
+                }
+            ],
+            payment_collections: [
+                {
+                    id: "paycol_" + o.id,
+                    payments: [
+                        {
+                            id: "pay_" + o.id,
+                            provider_id: o.payment_method || "manual",
+                            amount: parseFloat(o.total),
+                            created_at: o.created_at
+                        }
+                    ]
+                }
+            ],
             created_at: o.created_at,
             currency_code: "aud"
         }))
