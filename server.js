@@ -694,6 +694,7 @@ async function initCartTables() {
                 total NUMERIC(10,2) DEFAULT 0,
                 status TEXT DEFAULT 'pending',
                 shipping_address JSONB DEFAULT '{}',
+                billing_address JSONB DEFAULT '{}',
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         `)
@@ -702,6 +703,7 @@ async function initCartTables() {
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'")
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_total NUMERIC(10,2) DEFAULT 0")
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS billing_address JSONB DEFAULT '{}'")
     } catch (err) {
         console.error("Cart tables init error:", err.message)
     }
@@ -971,8 +973,8 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         if (!cart) return res.status(404).json({ message: "Cart not found" })
 
         await pool.query(
-            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address)]
+            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {})]
         )
 
         // Clear cart items
