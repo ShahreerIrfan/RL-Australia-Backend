@@ -946,17 +946,21 @@ app.post("/store/carts/:id/shipping-methods", async (req, res) => {
 
 // Payment Collections
 app.post("/store/payment-collections/:id/payment-sessions", async (req, res) => {
+    const { provider_id } = req.body
     res.status(200).json({
         payment_collection: {
             id: req.params.id,
-            payment_sessions: [{ id: "ps_mock", provider_id: "manual", status: "pending" }]
+            payment_sessions: [{ id: "ps_" + (provider_id || "manual"), provider_id: provider_id || "manual", status: "pending" }]
         }
     })
 })
 
 app.get("/store/payment-providers", async (req, res) => {
     res.status(200).json({
-        payment_providers: [{ id: "manual", is_enabled: true }]
+        payment_providers: [
+            { id: "manual", is_enabled: true },
+            { id: "paytree", is_enabled: true }
+        ]
     })
 })
 
