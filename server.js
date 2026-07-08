@@ -973,8 +973,8 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         if (!cart) return res.status(404).json({ message: "Cart not found" })
 
         const orderInsertRes = await pool.query(
-            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
-            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {})]
+            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address, order_number) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *",
+            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {}), "ORD-" + Date.now()]
         )
         const newOrder = orderInsertRes.rows[0]
 
@@ -1002,9 +1002,9 @@ app.post("/store/carts/:id/complete", async (req, res) => {
 // Get Order by ID
 app.get("/store/orders/:id", async (req, res) => {
     try {
-        let orderRes = await pool.query("SELECT * FROM rl_orders WHERE id = $1", [req.params.id])
+        let orderRes = await pool.query("SELECT * FROM rl_orders WHERE id::text = $1 OR order_number = $2", [req.params.id, req.params.id])
         if (orderRes.rows.length === 0) {
-            orderRes = await pool.query("SELECT * FROM rl_orders WHERE cart_id = $1", [req.params.id])
+            orderRes = await pool.query("SELECT * FROM rl_orders WHERE cart_id::text = $1", [req.params.id])
         }
         if (orderRes.rows.length === 0) {
             return res.status(404).json({ message: "Order not found" })
@@ -1013,6 +1013,7 @@ app.get("/store/orders/:id", async (req, res) => {
         res.status(200).json({
             order: {
                 id: o.id,
+                order_number: o.order_number,
                 cart_id: o.cart_id,
                 email: o.email,
                 items: typeof o.items === "string" ? JSON.parse(o.items) : o.items,
@@ -1042,6 +1043,7 @@ app.get("/store/orders", async (req, res) => {
         const result = await pool.query("SELECT * FROM rl_orders ORDER BY created_at DESC")
         const orders = result.rows.map(o => ({
             id: o.id,
+            order_number: o.order_number,
             cart_id: o.cart_id,
             email: o.email,
             items: typeof o.items === "string" ? JSON.parse(o.items) : o.items,
