@@ -870,42 +870,85 @@ app.post("/store/carts/:id/line-items", async (req, res) => {
         
         let price = 0
         let productId = null
-        
-        // Check if variant_id matches UUID layout format before querying UUID columns
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(variant_id)
+        let targetVariantId = null
+
+        const knownSlugs = {
+            "beef-liver-pills": { name: "Beef Liver Pills", price: 19.99, was: 24.99, desc: "Nature's multivitamin: B12, iron & folate in one tiny pill.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "glycine": { name: "Glycine", price: 17.99, was: 21.99, desc: "The sleep-and-skin amino acid your stack is missing.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "coq10": { name: "CoQ10", price: 18.99, was: 23.99, desc: "Mitochondrial fuel for energy that actually lasts.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "nmn": { name: "NMN", price: 22.99, was: 28.99, desc: "The NAD+ booster everyone's stacking for longevity.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "protein-creatine-gummies": { name: "Protein + Creatine Gummies", price: 16.99, was: 19.99, desc: "Gains in gummy form. No shaker, no excuses.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "l-reuteri": { name: "L. Reuteri (Probiotic)", price: 20.99, was: 25.99, desc: "Gut health meets feel-good hormones.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" }
+        }
+
+        const cleanVariantId = typeof variant_id === "string" ? variant_id.replace(/^var_/, "") : variant_id
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanVariantId)
         
         if (isUuid) {
             // 1. Check if variant_id exists in rl_product_variants
-            const variantCheck = await pool.query("SELECT * FROM rl_product_variants WHERE id = $1", [variant_id])
+            const variantCheck = await pool.query("SELECT * FROM rl_product_variants WHERE id = $1", [cleanVariantId])
             if (variantCheck.rows.length > 0) {
                 const variant = variantCheck.rows[0]
                 price = Number(variant.price)
                 productId = variant.product_id
+                targetVariantId = variant.id
             } else {
                 // 2. Fall back to checking if it is a product_id
-                const product = await pool.query("SELECT price FROM rl_products WHERE id = $1", [variant_id])
+                const product = await pool.query("SELECT price FROM rl_products WHERE id = $1", [cleanVariantId])
                 if (product.rows.length > 0) {
-                    productId = variant_id
+                    productId = cleanVariantId
                     price = Number(product.rows[0].price)
+                    const varCheck = await pool.query("SELECT id FROM rl_product_variants WHERE product_id = $1 LIMIT 1", [cleanVariantId])
+                    targetVariantId = varCheck.rows[0]?.id || cleanVariantId
                 }
+            }
+        } else if (knownSlugs[cleanVariantId]) {
+            const slug = cleanVariantId
+            const check = await pool.query("SELECT id, price FROM rl_products WHERE slug = $1", [slug])
+            if (check.rows.length > 0) {
+                productId = check.rows[0].id
+                price = Number(check.rows[0].price)
+                const varCheck = await pool.query("SELECT id FROM rl_product_variants WHERE product_id = $1 LIMIT 1", [productId])
+                targetVariantId = varCheck.rows[0]?.id || check.rows[0].id
+            } else {
+                // Create it on the fly!
+                const info = knownSlugs[slug]
+                const prodRes = await pool.query(
+                    "INSERT INTO rl_products (id, name, slug, description, price, original_price, image_url, is_active) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7) RETURNING id",
+                    [info.name, slug, info.desc, info.price, info.was, info.img, true]
+                )
+                const newProdId = prodRes.rows[0].id
+                const varRes = await pool.query(
+                    "INSERT INTO rl_product_variants (id, product_id, title, price, original_price, sku) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING id",
+                    [newProdId, "Single Bottle", info.price, info.was, slug.toUpperCase() + "-SINGLE"]
+                )
+                productId = newProdId
+                price = info.price
+                targetVariantId = varRes.rows[0].id
             }
         }
         
-        // If the ID is a mock string or not in the DB, fallback to the first active database product to allow flow completion
+        // If the ID is not in the DB and not a known slug, fallback to the first active database product
         if (!productId) {
             const firstProduct = await pool.query("SELECT id, price FROM rl_products WHERE is_active = true LIMIT 1")
             if (firstProduct.rows.length > 0) {
                 productId = firstProduct.rows[0].id
                 price = Number(firstProduct.rows[0].price)
+                const varCheck = await pool.query("SELECT id FROM rl_product_variants WHERE product_id = $1 LIMIT 1", [productId])
+                targetVariantId = varCheck.rows[0]?.id || productId
             } else {
                 return res.status(404).json({ message: "No active products found in database" })
             }
         }
 
+        if (!targetVariantId) {
+            targetVariantId = cleanVariantId
+        }
+
         // Check if item already exists in cart with this specific variant/product ID
         const existing = await pool.query(
             "SELECT id, quantity FROM rl_cart_items WHERE cart_id = $1 AND product_id = $2 AND variant_id = $3",
-            [req.params.id, productId, variant_id]
+            [req.params.id, productId, targetVariantId]
         )
         if (existing.rows.length > 0) {
             await pool.query(
@@ -915,7 +958,7 @@ app.post("/store/carts/:id/line-items", async (req, res) => {
         } else {
             await pool.query(
                 "INSERT INTO rl_cart_items (cart_id, product_id, variant_id, quantity, unit_price) VALUES ($1, $2, $3, $4, $5)",
-                [req.params.id, productId, variant_id, quantity || 1, price]
+                [req.params.id, productId, targetVariantId, quantity || 1, price]
             )
         }
         const cart = await buildCartResponse(req.params.id)
