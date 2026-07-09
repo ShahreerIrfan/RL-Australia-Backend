@@ -731,6 +731,52 @@ async function initCartTables() {
             await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
                 [newProdId, "Single Bottle", 22.99, 28.99, "NMN-SINGLE"])
         }
+
+        // Ensure Add-ons/Accessories category exists
+        let categoryId = null
+        const catCheck = await pool.query("SELECT id FROM rl_categories WHERE name = 'Add-ons/Accessories' OR name = 'Accessories' LIMIT 1")
+        if (catCheck.rows.length > 0) {
+            categoryId = catCheck.rows[0].id
+        } else {
+            const newCat = await pool.query(
+                "INSERT INTO rl_categories (id, name, slug) VALUES (gen_random_uuid(), 'Add-ons/Accessories', 'accessories') RETURNING id"
+            )
+            categoryId = newCat.rows[0].id
+        }
+
+        // Seeding accessories products
+        const syringesCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'sterile-insulin-syringes'")
+        if (syringesCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active, category_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+                ["Sterile Insulin Syringes (Pack of 10)", "sterile-insulin-syringes", "Insulin Syringes 1ml pack of 10 for mixing and administration.", 14.95, 19.95, "https://purepeptides.com.au/cdn/shop/files/Glycine.png", true, categoryId]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "Pack of 10", 14.95, 19.95, "SYRINGES-10"])
+        }
+
+        const waterCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'bacteriostatic-sterile-water'")
+        if (waterCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active, category_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+                ["Bacteriostatic Sterile Water (10ml)", "bacteriostatic-sterile-water", "Sterile water 10ml containing 0.9% benzyl alcohol preservative.", 9.95, 14.95, "https://purepeptides.com.au/cdn/shop/files/Glycine.png", true, categoryId]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "10ml Bottle", 9.95, 14.95, "WATER-10"])
+        }
+
+        const wipesCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'alcohol-prep-wipes'")
+        if (wipesCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active, category_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+                ["Alcohol Prep Wipes (Box of 100)", "alcohol-prep-wipes", "Alcohol prep wipes containing 70% Isopropyl Alcohol.", 6.50, 9.95, "https://purepeptides.com.au/cdn/shop/files/Glycine.png", true, categoryId]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "Box of 100", 6.50, 9.95, "WIPES-100"])
+        }
     } catch (err) {
         console.error("Cart tables init error:", err.message)
     }
@@ -878,7 +924,10 @@ app.post("/store/carts/:id/line-items", async (req, res) => {
             "coq10": { name: "CoQ10", price: 18.99, was: 23.99, desc: "Mitochondrial fuel for energy that actually lasts.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
             "nmn": { name: "NMN", price: 22.99, was: 28.99, desc: "The NAD+ booster everyone's stacking for longevity.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
             "protein-creatine-gummies": { name: "Protein + Creatine Gummies", price: 16.99, was: 19.99, desc: "Gains in gummy form. No shaker, no excuses.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
-            "l-reuteri": { name: "L. Reuteri (Probiotic)", price: 20.99, was: 25.99, desc: "Gut health meets feel-good hormones.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" }
+            "l-reuteri": { name: "L. Reuteri (Probiotic)", price: 20.99, was: 25.99, desc: "Gut health meets feel-good hormones.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "sterile-insulin-syringes": { name: "Sterile Insulin Syringes (Pack of 10)", price: 14.95, was: 19.95, desc: "Insulin Syringes 1ml pack of 10 for mixing and administration.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "bacteriostatic-sterile-water": { name: "Bacteriostatic Sterile Water (10ml)", price: 9.95, was: 14.95, desc: "Sterile water 10ml containing 0.9% benzyl alcohol preservative.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "alcohol-prep-wipes": { name: "Alcohol Prep Wipes (Box of 100)", price: 6.50, was: 9.95, desc: "Alcohol prep wipes containing 70% Isopropyl Alcohol.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" }
         }
 
         const cleanVariantId = typeof variant_id === "string" ? variant_id.replace(/^var_/, "") : variant_id
