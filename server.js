@@ -1393,6 +1393,111 @@ const deleteCategory = async (req, res) => {
 app.delete("/admin/categories/:id", deleteCategory)
 app.delete("/admin/product-categories/:id", deleteCategory)
 
+// ============ STACK BUILDER / QUIZ OPTIONS ============
+
+// Initialize recommendations table
+async function initRecommendationsTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS rl_recommendations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                icon TEXT DEFAULT 'Heart',
+                goal_name TEXT NOT NULL UNIQUE,
+                description TEXT DEFAULT '',
+                product_ids JSONB DEFAULT '[]'::jsonb,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        `)
+    } catch (err) {
+        console.error("Error creating recommendations table:", err.message)
+    }
+}
+initRecommendationsTable()
+
+// GET /store/recommendations - List all quiz options with products (public)
+app.get("/store/recommendations", async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM rl_recommendations ORDER BY created_at ASC")
+        const recommendations = await Promise.all(
+            result.rows.map(async (rec) => {
+                const productIds = rec.product_ids || []
+                let products = []
+                if (productIds.length > 0) {
+                    const placeholders = productIds.map((_, i) => `$${i + 1}`).join(",")
+                    const prodResult = await pool.query(
+                        `SELECT * FROM rl_products WHERE id::text IN (${placeholders})`,
+                        productIds
+                    )
+                    products = prodResult.rows.map(mapRowToProduct)
+                }
+                return {
+                    id: rec.id,
+                    icon: rec.icon || "Heart",
+                    goal_name: rec.goal_name,
+                    description: rec.description || "",
+                    product_ids: productIds,
+                    products,
+                }
+            })
+        )
+        res.json({ recommendations, goals: recommendations })
+    } catch (err) {
+        res.status(500).json({ message: err.message || "Failed to fetch recommendations" })
+    }
+})
+
+// POST /store/recommendations - Create a new quiz option
+app.post("/store/recommendations", async (req, res) => {
+    try {
+        const { icon, goal_name, description, product_ids } = req.body
+        if (!goal_name) {
+            return res.status(400).json({ message: "goal_name is required" })
+        }
+        const result = await pool.query(
+            `INSERT INTO rl_recommendations (icon, goal_name, description, product_ids)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+            [icon || "Heart", goal_name, description || "", JSON.stringify(product_ids || [])]
+        )
+        res.status(201).json({ goal: result.rows[0] })
+    } catch (err) {
+        if (err.code === "23505") {
+            return res.status(400).json({ message: "A quiz option with this name already exists" })
+        }
+        res.status(500).json({ message: err.message || "Failed to create quiz option" })
+    }
+})
+
+// POST /store/recommendations/:id - Update a quiz option
+app.post("/store/recommendations/:id", async (req, res) => {
+    try {
+        const { id } = req.params
+        const { icon, goal_name, description, product_ids } = req.body
+        const result = await pool.query(
+            `UPDATE rl_recommendations SET icon = COALESCE($1, icon), goal_name = COALESCE($2, goal_name), description = COALESCE($3, description), product_ids = COALESCE($4, product_ids), updated_at = NOW() WHERE id = $5 RETURNING *`,
+            [icon, goal_name, description, product_ids ? JSON.stringify(product_ids) : null, id]
+        )
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Quiz option not found" })
+        }
+        res.json({ goal: result.rows[0] })
+    } catch (err) {
+        res.status(500).json({ message: err.message || "Failed to update quiz option" })
+    }
+})
+
+// DELETE /store/recommendations/:id - Delete a quiz option
+app.delete("/store/recommendations/:id", async (req, res) => {
+    try {
+        const { id } = req.params
+        await pool.query("DELETE FROM rl_recommendations WHERE id = $1", [id])
+        res.json({ message: "Deleted successfully" })
+    } catch (err) {
+        res.status(500).json({ message: err.message || "Failed to delete quiz option" })
+    }
+})
+
 // ============ START ============
 
 app.listen(PORT, () => {
