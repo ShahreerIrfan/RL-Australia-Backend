@@ -669,6 +669,7 @@ async function initCartTables() {
         await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_method TEXT")
         await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_total NUMERIC(10,2) DEFAULT 0")
         await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS payment_method TEXT")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_protection BOOLEAN DEFAULT false")
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS rl_cart_items (
@@ -696,6 +697,7 @@ async function initCartTables() {
                 status TEXT DEFAULT 'pending',
                 shipping_address JSONB DEFAULT '{}',
                 billing_address JSONB DEFAULT '{}',
+                shipping_protection BOOLEAN DEFAULT false,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         `)
@@ -705,6 +707,30 @@ async function initCartTables() {
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_total NUMERIC(10,2) DEFAULT 0")
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'")
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS billing_address JSONB DEFAULT '{}'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_protection BOOLEAN DEFAULT false")
+
+        // Ensure Glycine and NMN exist in rl_products and variants
+        const glycineCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'glycine'")
+        if (glycineCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+                ["Glycine", "glycine", "The sleep-and-skin amino acid your stack is missing.", 17.99, 21.99, "https://purepeptides.com.au/cdn/shop/files/Glycine.png", true]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "Single Bottle", 17.99, 21.99, "GLY-SINGLE"])
+        }
+
+        const nmnCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'nmn'")
+        if (nmnCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+                ["NMN", "nmn", "The NAD+ booster everyone's stacking for longevity.", 22.99, 28.99, "https://purepeptides.com.au/cdn/shop/files/NMN.png", true]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "Single Bottle", 22.99, 28.99, "NMN-SINGLE"])
+        }
     } catch (err) {
         console.error("Cart tables init error:", err.message)
     }
@@ -758,8 +784,11 @@ async function buildCartResponse(cartId) {
     })
 
     const subtotal = items.reduce((sum, i) => sum + i.total, 0)
-    const shippingTotal = parseFloat(cart.shipping_total) || 0
-    const total = subtotal + shippingTotal
+    // Free shipping threshold of $200
+    const shippingTotal = (subtotal >= 200 && subtotal > 0) ? 0.00 : (parseFloat(cart.shipping_total) || 9.95)
+    // Shipping protection cost is $6.50 if enabled
+    const protectionTotal = cart.shipping_protection ? 6.50 : 0.00
+    const total = subtotal + shippingTotal + protectionTotal
 
     return {
         id: cart.id,
@@ -776,6 +805,8 @@ async function buildCartResponse(cartId) {
         discount_total: 0,
         total,
         item_total: subtotal,
+        shipping_protection: !!cart.shipping_protection,
+        shipping_protection_total: protectionTotal,
         region: { id: "reg_au", name: "Australia", currency_code: "aud", tax_rate: 0 },
         payment_collection: null
     }
@@ -979,12 +1010,13 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         const cart = await buildCartResponse(req.params.id)
         if (!cart) return res.status(404).json({ message: "Cart not found" })
 
-        const cartDbRes = await pool.query("SELECT payment_method FROM rl_carts WHERE id = $1", [req.params.id])
+        const cartDbRes = await pool.query("SELECT payment_method, shipping_protection FROM rl_carts WHERE id = $1", [req.params.id])
         const paymentMethod = cartDbRes.rows[0]?.payment_method || "manual"
+        const shippingProtection = !!cartDbRes.rows[0]?.shipping_protection
 
         const orderInsertRes = await pool.query(
-            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address, order_number, payment_method) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
-            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {}), "ORD-" + Date.now(), paymentMethod]
+            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address, order_number, payment_method, shipping_protection) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *",
+            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {}), "ORD-" + Date.now(), paymentMethod, shippingProtection]
         )
         const newOrder = orderInsertRes.rows[0]
 
@@ -1006,6 +1038,20 @@ app.post("/store/carts/:id/complete", async (req, res) => {
     } catch (err) {
         console.error("Complete cart error:", err.message)
         res.status(500).json({ message: "Failed to complete checkout" })
+    }
+})
+
+// Set Shipping Protection
+app.post("/store/carts/:id/shipping-protection", async (req, res) => {
+    try {
+        const { enabled } = req.body
+        await pool.query("UPDATE rl_carts SET shipping_protection = $1, updated_at = NOW() WHERE id = $2",
+            [!!enabled, req.params.id])
+        const cart = await buildCartResponse(req.params.id)
+        res.status(200).json({ cart })
+    } catch (err) {
+        console.error("Set shipping protection error:", err.message)
+        res.status(500).json({ message: "Failed to update shipping protection" })
     }
 })
 
