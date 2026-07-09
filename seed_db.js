@@ -27,10 +27,14 @@ const products = [
     price: 49.95,
     original_price: 64.95,
     discount_percent: 23,
-    image_url: "/assets/products/asset 6.png",
+    image_url: "/assets/products/bpc-157.png",
     sku: "BPC157-5MG",
     stock_quantity: 150,
-    category_slug: "peptides"
+    category_slug: "peptides",
+    variants: [
+      { title: "Single Vial", price: 49.95, original_price: 64.95, sku: "BPC157-1VIAL", stock_quantity: 100, weight: "5 Gram" },
+      { title: "5-Pack", price: 199.95, original_price: 249.95, sku: "BPC157-5PACK", stock_quantity: 50, weight: "25 Gram" }
+    ]
   },
   {
     name: "TB-500 (Thymosin Beta)",
@@ -81,7 +85,11 @@ const products = [
     image_url: "/assets/products/asset 8.png",
     sku: "CJC1295-2MG",
     stock_quantity: 200,
-    category_slug: "peptides"
+    category_slug: "peptides",
+    variants: [
+      { title: "Single Vial", price: 44.95, original_price: 59.95, sku: "CJC1295-2MG", stock_quantity: 200, weight: "5 Gram" },
+      { title: "Double Vial", price: 80.00, original_price: 70.00, sku: "CJC1295-2MH", stock_quantity: 100, weight: "10 Gram" }
+    ]
   },
   // Nootropics
   {
@@ -221,7 +229,11 @@ const products = [
     image_url: "/assets/products/asset 8.png",
     sku: "BEEFLIVER-120",
     stock_quantity: 150,
-    category_slug: "add-ons"
+    category_slug: "add-ons",
+    variants: [
+      { title: "Single Vial", price: 19.99, original_price: 24.99, sku: "BEEFLIVER-120", stock_quantity: 150, weight: "5 Gram" },
+      { title: "Double Vial", price: 37.00, original_price: 45.00, sku: "BEEFLIVER-121", stock_quantity: 100, weight: "10 Gram" }
+    ]
   }
 ];
 
@@ -249,7 +261,7 @@ client.connect()
         console.error(`Error: Category id not found for slug ${prod.category_slug}`);
         continue;
       }
-      await client.query(
+      const res = await client.query(
         `INSERT INTO rl_products (
           id, category_id, name, slug, description, short_description, 
           dosage, purity, molecular_weight, molecular_formula, 
@@ -257,7 +269,7 @@ client.connect()
           sku, stock_quantity, is_active, is_featured, sort_order, image_gallery
         ) VALUES (
           gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, true, false, 0, $16
-        )`,
+        ) RETURNING id`,
         [
           catId, prod.name, prod.slug, prod.description, prod.short_description,
           prod.dosage, prod.purity, prod.molecular_weight, prod.molecular_formula,
@@ -265,7 +277,28 @@ client.connect()
           prod.sku, prod.stock_quantity, []
         ]
       );
+      const productId = res.rows[0].id;
       console.log(`Created product: ${prod.name}`);
+
+      // Seed variants
+      const prodVariants = prod.variants || [
+        {
+          title: "Single Vial",
+          price: prod.price,
+          original_price: prod.original_price,
+          sku: prod.sku,
+          stock_quantity: prod.stock_quantity,
+          weight: ""
+        }
+      ];
+
+      for (const v of prodVariants) {
+        await client.query(
+          `INSERT INTO rl_product_variants (product_id, title, price, original_price, sku, stock_quantity, weight)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [productId, v.title, v.price, v.original_price, v.sku, v.stock_quantity, v.weight]
+        );
+      }
     }
 
     console.log("SUCCESS: Seeding completed successfully!");

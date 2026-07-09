@@ -269,6 +269,8 @@ function mapRowToProduct(row) {
         id: row.id,
         title: row.name,
         handle: row.slug,
+        price: Number(row.price),
+        original_price: Number(row.original_price || row.price),
         description: row.description,
         short_description: row.short_description,
         thumbnail: row.image_url || "/assets/peptide-vial.png",
@@ -305,19 +307,32 @@ function mapRowToProduct(row) {
 // 2. Get Products (storefront listing and details filtering)
 app.get("/store/products", async (req, res) => {
     try {
-        const { handle, category_id } = req.query
+        const { handle, category_id, id } = req.query
         let queryStr = `
             SELECT p.*, c.name as category_name 
             FROM rl_products p
             LEFT JOIN rl_categories c ON p.category_id = c.id
         `
         const params = []
+        let parsedId = id
+        if (Array.isArray(parsedId)) {
+            parsedId = parsedId[0]
+        }
+
+        let parsedCategoryId = category_id || req.query['category_id[]'] || req.query['category_id']
+        if (Array.isArray(parsedCategoryId)) {
+            parsedCategoryId = parsedCategoryId[0]
+        }
+
         if (handle) {
             queryStr += " WHERE p.slug = $1"
             params.push(handle)
-        } else if (category_id) {
+        } else if (parsedId) {
+            queryStr += " WHERE p.id = $1"
+            params.push(parsedId)
+        } else if (parsedCategoryId) {
             queryStr += " WHERE p.category_id = $1"
-            params.push(category_id)
+            params.push(parsedCategoryId)
         }
         queryStr += " ORDER BY p.created_at DESC"
         
@@ -364,6 +379,52 @@ app.get("/store/products", async (req, res) => {
         res.status(200).json({ products, count: products.length, limit: 100, offset: 0 })
     } catch (error) {
         console.error("Get products error:", error.message)
+        res.status(500).json({ message: "Internal server error" })
+    }
+})
+
+app.get("/store/products/:id", async (req, res) => {
+    try {
+        const { id } = req.params
+        const result = await pool.query(
+            `SELECT p.*, c.name as category_name 
+             FROM rl_products p
+             LEFT JOIN rl_categories c ON p.category_id = c.id
+             WHERE p.id = $1`,
+            [id]
+        )
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Product not found" })
+        }
+        
+        const row = result.rows[0]
+        const mapped = mapRowToProduct(row)
+        
+        // Fetch variants for this product
+        const varsResult = await pool.query(
+            "SELECT * FROM rl_product_variants WHERE product_id = $1 ORDER BY price ASC",
+            [id]
+        )
+        if (varsResult.rows.length > 0) {
+            mapped.variants = varsResult.rows.map(v => ({
+                id: v.id,
+                sku: v.sku || "",
+                title: v.title,
+                weight: v.weight || "",
+                inventory_quantity: v.stock_quantity || 0,
+                options: [],
+                calculated_price: {
+                    calculated_amount: Number(v.price),
+                    original_amount: Number(v.original_price || v.price),
+                    currency_code: "aud",
+                    calculated_price: { price_list_type: null }
+                }
+            }))
+        }
+        
+        res.status(200).json({ product: mapped })
+    } catch (error) {
+        console.error("Get product by ID error:", error.message)
         res.status(500).json({ message: "Internal server error" })
     }
 })
@@ -601,6 +662,17 @@ async function initCartTables() {
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         `)
+        // Apply alterations to support legacy PostgreSQL schemas
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS email TEXT")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS billing_address JSONB DEFAULT '{}'")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS region_id TEXT DEFAULT 'reg_au'")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS currency_code TEXT DEFAULT 'aud'")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_method TEXT")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_total NUMERIC(10,2) DEFAULT 0")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS payment_method TEXT")
+        await pool.query("ALTER TABLE rl_carts ADD COLUMN IF NOT EXISTS shipping_protection BOOLEAN DEFAULT false")
+
         await pool.query(`
             CREATE TABLE IF NOT EXISTS rl_cart_items (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -612,6 +684,9 @@ async function initCartTables() {
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         `)
+        await pool.query("ALTER TABLE rl_cart_items ADD COLUMN IF NOT EXISTS variant_id TEXT")
+        await pool.query("ALTER TABLE rl_cart_items ADD COLUMN IF NOT EXISTS unit_price NUMERIC(10,2) DEFAULT 0")
+
         await pool.query(`
             CREATE TABLE IF NOT EXISTS rl_orders (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -623,9 +698,93 @@ async function initCartTables() {
                 total NUMERIC(10,2) DEFAULT 0,
                 status TEXT DEFAULT 'pending',
                 shipping_address JSONB DEFAULT '{}',
+                billing_address JSONB DEFAULT '{}',
+                shipping_protection BOOLEAN DEFAULT false,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         `)
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS cart_id UUID")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS email TEXT")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_total NUMERIC(10,2) DEFAULT 0")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS billing_address JSONB DEFAULT '{}'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_protection BOOLEAN DEFAULT false")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_method TEXT DEFAULT 'Standard Delivery'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS tracking_number TEXT")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS tracking_provider TEXT")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS tracking_link TEXT")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS private_notes JSONB DEFAULT '[]'")
+
+        // Ensure Glycine and NMN exist in rl_products and variants
+        const glycineCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'glycine'")
+        if (glycineCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+                ["Glycine", "glycine", "The sleep-and-skin amino acid your stack is missing.", 17.99, 21.99, "https://purepeptides.com.au/cdn/shop/files/Glycine.png", true]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "Single Bottle", 17.99, 21.99, "GLY-SINGLE"])
+        }
+
+        const nmnCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'nmn'")
+        if (nmnCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+                ["NMN", "nmn", "The NAD+ booster everyone's stacking for longevity.", 22.99, 28.99, "https://purepeptides.com.au/cdn/shop/files/NMN.png", true]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "Single Bottle", 22.99, 28.99, "NMN-SINGLE"])
+        }
+
+        // Ensure Add-ons/Accessories category exists
+        let categoryId = null
+        const catCheck = await pool.query("SELECT id FROM rl_categories WHERE name = 'Add-ons/Accessories' OR name = 'Accessories' LIMIT 1")
+        if (catCheck.rows.length > 0) {
+            categoryId = catCheck.rows[0].id
+        } else {
+            const newCat = await pool.query(
+                "INSERT INTO rl_categories (id, name, slug) VALUES (gen_random_uuid(), 'Add-ons/Accessories', 'accessories') RETURNING id"
+            )
+            categoryId = newCat.rows[0].id
+        }
+
+        // Seeding accessories products
+        const syringesCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'sterile-insulin-syringes'")
+        if (syringesCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active, category_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+                ["Sterile Insulin Syringes (Pack of 10)", "sterile-insulin-syringes", "Insulin Syringes 1ml pack of 10 for mixing and administration.", 14.95, 19.95, "https://purepeptides.com.au/cdn/shop/files/Glycine.png", true, categoryId]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "Pack of 10", 14.95, 19.95, "SYRINGES-10"])
+        }
+
+        const waterCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'bacteriostatic-sterile-water'")
+        if (waterCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active, category_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+                ["Bacteriostatic Sterile Water (10ml)", "bacteriostatic-sterile-water", "Sterile water 10ml containing 0.9% benzyl alcohol preservative.", 9.95, 14.95, "https://purepeptides.com.au/cdn/shop/files/Glycine.png", true, categoryId]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "10ml Bottle", 9.95, 14.95, "WATER-10"])
+        }
+
+        const wipesCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'alcohol-prep-wipes'")
+        if (wipesCheck.rows.length === 0) {
+            const prodRes = await pool.query(
+                "INSERT INTO rl_products (name, slug, description, price, original_price, image_url, is_active, category_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+                ["Alcohol Prep Wipes (Box of 100)", "alcohol-prep-wipes", "Alcohol prep wipes containing 70% Isopropyl Alcohol.", 6.50, 9.95, "https://purepeptides.com.au/cdn/shop/files/Glycine.png", true, categoryId]
+            )
+            const newProdId = prodRes.rows[0].id
+            await pool.query("INSERT INTO rl_product_variants (product_id, title, price, original_price, sku) VALUES ($1, $2, $3, $4, $5)",
+                [newProdId, "Box of 100", 6.50, 9.95, "WIPES-100"])
+        }
     } catch (err) {
         console.error("Cart tables init error:", err.message)
     }
@@ -646,7 +805,9 @@ async function buildCartResponse(cartId) {
         ORDER BY ci.created_at ASC
     `, [cartId])
 
-    const variantIds = itemsRes.rows.map(row => row.variant_id).filter(id => id && id !== row.product_id)
+    const variantIds = itemsRes.rows
+        .filter(row => row.variant_id && row.variant_id !== row.product_id)
+        .map(row => row.variant_id)
     let variantsMap = {}
     if (variantIds.length > 0) {
         const varsRes = await pool.query("SELECT id, title FROM rl_product_variants WHERE id = ANY($1)", [variantIds])
@@ -677,8 +838,11 @@ async function buildCartResponse(cartId) {
     })
 
     const subtotal = items.reduce((sum, i) => sum + i.total, 0)
-    const shippingTotal = parseFloat(cart.shipping_total) || 0
-    const total = subtotal + shippingTotal
+    // Free shipping threshold of $200
+    const shippingTotal = (subtotal >= 200 && subtotal > 0) ? 0.00 : (parseFloat(cart.shipping_total) || 9.95)
+    // Shipping protection cost is $6.50 if enabled
+    const protectionTotal = cart.shipping_protection ? 6.50 : 0.00
+    const total = subtotal + shippingTotal + protectionTotal
 
     return {
         id: cart.id,
@@ -695,6 +859,8 @@ async function buildCartResponse(cartId) {
         discount_total: 0,
         total,
         item_total: subtotal,
+        shipping_protection: !!cart.shipping_protection,
+        shipping_protection_total: protectionTotal,
         region: { id: "reg_au", name: "Australia", currency_code: "aud", tax_rate: 0 },
         payment_collection: null
     }
@@ -758,25 +924,88 @@ app.post("/store/carts/:id/line-items", async (req, res) => {
         
         let price = 0
         let productId = null
-        
-        // 1. Check if variant_id exists in rl_product_variants
-        const variantCheck = await pool.query("SELECT * FROM rl_product_variants WHERE id = $1", [variant_id])
-        if (variantCheck.rows.length > 0) {
-            const variant = variantCheck.rows[0]
-            price = Number(variant.price)
-            productId = variant.product_id
-        } else {
-            // 2. Fall back to product_id
-            productId = variant_id
-            const product = await pool.query("SELECT price FROM rl_products WHERE id = $1", [productId])
-            if (product.rows.length === 0) return res.status(404).json({ message: "Product not found" })
-            price = Number(product.rows[0].price)
+        let targetVariantId = null
+
+        const knownSlugs = {
+            "beef-liver-pills": { name: "Beef Liver Pills", price: 19.99, was: 24.99, desc: "Nature's multivitamin: B12, iron & folate in one tiny pill.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "glycine": { name: "Glycine", price: 17.99, was: 21.99, desc: "The sleep-and-skin amino acid your stack is missing.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "coq10": { name: "CoQ10", price: 18.99, was: 23.99, desc: "Mitochondrial fuel for energy that actually lasts.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "nmn": { name: "NMN", price: 22.99, was: 28.99, desc: "The NAD+ booster everyone's stacking for longevity.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "protein-creatine-gummies": { name: "Protein + Creatine Gummies", price: 16.99, was: 19.99, desc: "Gains in gummy form. No shaker, no excuses.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "l-reuteri": { name: "L. Reuteri (Probiotic)", price: 20.99, was: 25.99, desc: "Gut health meets feel-good hormones.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "sterile-insulin-syringes": { name: "Sterile Insulin Syringes (Pack of 10)", price: 14.95, was: 19.95, desc: "Insulin Syringes 1ml pack of 10 for mixing and administration.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "bacteriostatic-sterile-water": { name: "Bacteriostatic Sterile Water (10ml)", price: 9.95, was: 14.95, desc: "Sterile water 10ml containing 0.9% benzyl alcohol preservative.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" },
+            "alcohol-prep-wipes": { name: "Alcohol Prep Wipes (Box of 100)", price: 6.50, was: 9.95, desc: "Alcohol prep wipes containing 70% Isopropyl Alcohol.", img: "https://purepeptides.com.au/cdn/shop/files/Glycine.png" }
         }
 
-        // Check if item already exists in cart with this specific variant ID
+        const cleanVariantId = typeof variant_id === "string" ? variant_id.replace(/^var_/, "") : variant_id
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanVariantId)
+        
+        if (isUuid) {
+            // 1. Check if variant_id exists in rl_product_variants
+            const variantCheck = await pool.query("SELECT * FROM rl_product_variants WHERE id = $1", [cleanVariantId])
+            if (variantCheck.rows.length > 0) {
+                const variant = variantCheck.rows[0]
+                price = Number(variant.price)
+                productId = variant.product_id
+                targetVariantId = variant.id
+            } else {
+                // 2. Fall back to checking if it is a product_id
+                const product = await pool.query("SELECT price FROM rl_products WHERE id = $1", [cleanVariantId])
+                if (product.rows.length > 0) {
+                    productId = cleanVariantId
+                    price = Number(product.rows[0].price)
+                    const varCheck = await pool.query("SELECT id FROM rl_product_variants WHERE product_id = $1 LIMIT 1", [cleanVariantId])
+                    targetVariantId = varCheck.rows[0]?.id || cleanVariantId
+                }
+            }
+        } else if (knownSlugs[cleanVariantId]) {
+            const slug = cleanVariantId
+            const check = await pool.query("SELECT id, price FROM rl_products WHERE slug = $1", [slug])
+            if (check.rows.length > 0) {
+                productId = check.rows[0].id
+                price = Number(check.rows[0].price)
+                const varCheck = await pool.query("SELECT id FROM rl_product_variants WHERE product_id = $1 LIMIT 1", [productId])
+                targetVariantId = varCheck.rows[0]?.id || check.rows[0].id
+            } else {
+                // Create it on the fly!
+                const info = knownSlugs[slug]
+                const prodRes = await pool.query(
+                    "INSERT INTO rl_products (id, name, slug, description, price, original_price, image_url, is_active) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7) RETURNING id",
+                    [info.name, slug, info.desc, info.price, info.was, info.img, true]
+                )
+                const newProdId = prodRes.rows[0].id
+                const varRes = await pool.query(
+                    "INSERT INTO rl_product_variants (id, product_id, title, price, original_price, sku) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING id",
+                    [newProdId, "Single Bottle", info.price, info.was, slug.toUpperCase() + "-SINGLE"]
+                )
+                productId = newProdId
+                price = info.price
+                targetVariantId = varRes.rows[0].id
+            }
+        }
+        
+        // If the ID is not in the DB and not a known slug, fallback to the first active database product
+        if (!productId) {
+            const firstProduct = await pool.query("SELECT id, price FROM rl_products WHERE is_active = true LIMIT 1")
+            if (firstProduct.rows.length > 0) {
+                productId = firstProduct.rows[0].id
+                price = Number(firstProduct.rows[0].price)
+                const varCheck = await pool.query("SELECT id FROM rl_product_variants WHERE product_id = $1 LIMIT 1", [productId])
+                targetVariantId = varCheck.rows[0]?.id || productId
+            } else {
+                return res.status(404).json({ message: "No active products found in database" })
+            }
+        }
+
+        if (!targetVariantId) {
+            targetVariantId = cleanVariantId
+        }
+
+        // Check if item already exists in cart with this specific variant/product ID
         const existing = await pool.query(
             "SELECT id, quantity FROM rl_cart_items WHERE cart_id = $1 AND product_id = $2 AND variant_id = $3",
-            [req.params.id, productId, variant_id]
+            [req.params.id, productId, targetVariantId]
         )
         if (existing.rows.length > 0) {
             await pool.query(
@@ -786,7 +1015,7 @@ app.post("/store/carts/:id/line-items", async (req, res) => {
         } else {
             await pool.query(
                 "INSERT INTO rl_cart_items (cart_id, product_id, variant_id, quantity, unit_price) VALUES ($1, $2, $3, $4, $5)",
-                [req.params.id, productId, variant_id, quantity || 1, price]
+                [req.params.id, productId, targetVariantId, quantity || 1, price]
             )
         }
         const cart = await buildCartResponse(req.params.id)
@@ -851,17 +1080,27 @@ app.post("/store/carts/:id/shipping-methods", async (req, res) => {
 
 // Payment Collections
 app.post("/store/payment-collections/:id/payment-sessions", async (req, res) => {
-    res.status(200).json({
-        payment_collection: {
-            id: req.params.id,
-            payment_sessions: [{ id: "ps_mock", provider_id: "manual", status: "pending" }]
-        }
-    })
+    try {
+        const { provider_id } = req.body
+        await pool.query("UPDATE rl_carts SET payment_method = $1 WHERE id = $2", [provider_id || "manual", req.params.id])
+        res.status(200).json({
+            payment_collection: {
+                id: req.params.id,
+                payment_sessions: [{ id: "ps_" + (provider_id || "manual"), provider_id: provider_id || "manual", status: "pending" }]
+            }
+        })
+    } catch (err) {
+        console.error("Save payment session error:", err.message)
+        res.status(500).json({ message: "Failed to set payment session" })
+    }
 })
 
 app.get("/store/payment-providers", async (req, res) => {
     res.status(200).json({
-        payment_providers: [{ id: "manual", is_enabled: true }]
+        payment_providers: [
+            { id: "manual", is_enabled: true },
+            { id: "paytree", is_enabled: true }
+        ]
     })
 })
 
@@ -871,10 +1110,15 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         const cart = await buildCartResponse(req.params.id)
         if (!cart) return res.status(404).json({ message: "Cart not found" })
 
-        await pool.query(
-            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address)]
+        const cartDbRes = await pool.query("SELECT payment_method, shipping_protection FROM rl_carts WHERE id = $1", [req.params.id])
+        const paymentMethod = cartDbRes.rows[0]?.payment_method || "manual"
+        const shippingProtection = !!cartDbRes.rows[0]?.shipping_protection
+
+        const orderInsertRes = await pool.query(
+            "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address, order_number, payment_method, shipping_protection) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *",
+            [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {}), "ORD-" + Date.now(), paymentMethod, shippingProtection]
         )
+        const newOrder = orderInsertRes.rows[0]
 
         // Clear cart items
         await pool.query("DELETE FROM rl_cart_items WHERE cart_id = $1", [req.params.id])
@@ -882,7 +1126,7 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         res.status(200).json({
             type: "order",
             order: {
-                id: "order_" + Date.now(),
+                id: newOrder.id,
                 status: "confirmed",
                 items: cart.items,
                 subtotal: cart.subtotal,
@@ -894,6 +1138,201 @@ app.post("/store/carts/:id/complete", async (req, res) => {
     } catch (err) {
         console.error("Complete cart error:", err.message)
         res.status(500).json({ message: "Failed to complete checkout" })
+    }
+})
+
+// Set Shipping Protection
+app.post("/store/carts/:id/shipping-protection", async (req, res) => {
+    try {
+        const { enabled } = req.body
+        await pool.query("UPDATE rl_carts SET shipping_protection = $1, updated_at = NOW() WHERE id = $2",
+            [!!enabled, req.params.id])
+        const cart = await buildCartResponse(req.params.id)
+        res.status(200).json({ cart })
+    } catch (err) {
+        console.error("Set shipping protection error:", err.message)
+        res.status(500).json({ message: "Failed to update shipping protection" })
+    }
+})
+
+// Get Order by ID
+app.get("/store/orders/:id", async (req, res) => {
+    try {
+        let orderRes = await pool.query("SELECT * FROM rl_orders WHERE id::text = $1 OR order_number = $2", [req.params.id, req.params.id])
+        if (orderRes.rows.length === 0) {
+            orderRes = await pool.query("SELECT * FROM rl_orders WHERE cart_id::text = $1", [req.params.id])
+        }
+        if (orderRes.rows.length === 0) {
+            return res.status(404).json({ message: "Order not found" })
+        }
+        const o = orderRes.rows[0]
+        res.status(200).json({
+            order: {
+                id: o.id,
+                order_number: o.order_number,
+                cart_id: o.cart_id,
+                email: o.email,
+                items: typeof o.items === "string" ? JSON.parse(o.items) : o.items,
+                subtotal: parseFloat(o.subtotal),
+                item_subtotal: parseFloat(o.subtotal),
+                shipping_total: parseFloat(o.shipping_total),
+                shipping_subtotal: parseFloat(o.shipping_total),
+                discount_subtotal: 0,
+                tax_total: 0,
+                total: parseFloat(o.total),
+                status: o.status,
+                payment_status: o.payment_status || "pending",
+                shipping_method: o.shipping_method || "Standard Delivery",
+                tracking_number: o.tracking_number || null,
+                tracking_provider: o.tracking_provider || null,
+                tracking_link: o.tracking_link || null,
+                private_notes: typeof o.private_notes === "string" ? JSON.parse(o.private_notes) : (o.private_notes || []),
+                shipping_address: typeof o.shipping_address === "string" ? JSON.parse(o.shipping_address) : o.shipping_address,
+                billing_address: typeof o.billing_address === "string" ? JSON.parse(o.billing_address) : o.billing_address,
+                shipping_methods: [
+                    {
+                        id: "sm_" + o.id,
+                        name: o.shipping_method || "Standard Delivery",
+                        amount: parseFloat(o.shipping_total),
+                        total: parseFloat(o.shipping_total)
+                    }
+                ],
+                payment_collections: [
+                    {
+                        id: "paycol_" + o.id,
+                        payments: [
+                            {
+                                id: "pay_" + o.id,
+                                provider_id: o.payment_method || "manual",
+                                amount: parseFloat(o.total),
+                                created_at: o.created_at
+                            }
+                        ]
+                    }
+                ],
+                created_at: o.created_at,
+                currency_code: "aud"
+            }
+        })
+    } catch (err) {
+        console.error("Get order error:", err.message)
+        res.status(500).json({ message: "Failed to fetch order" })
+    }
+})
+
+// List Orders
+app.get("/store/orders", async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM rl_orders ORDER BY created_at DESC")
+        const orders = result.rows.map(o => ({
+            id: o.id,
+            order_number: o.order_number,
+            cart_id: o.cart_id,
+            email: o.email,
+            items: typeof o.items === "string" ? JSON.parse(o.items) : o.items,
+            subtotal: parseFloat(o.subtotal),
+            item_subtotal: parseFloat(o.subtotal),
+            shipping_total: parseFloat(o.shipping_total),
+            shipping_subtotal: parseFloat(o.shipping_total),
+            discount_subtotal: 0,
+            tax_total: 0,
+            total: parseFloat(o.total),
+            status: o.status,
+            payment_status: o.payment_status || "pending",
+            shipping_method: o.shipping_method || "Standard Delivery",
+            tracking_number: o.tracking_number || null,
+            tracking_provider: o.tracking_provider || null,
+            tracking_link: o.tracking_link || null,
+            private_notes: typeof o.private_notes === "string" ? JSON.parse(o.private_notes) : (o.private_notes || []),
+            shipping_address: typeof o.shipping_address === "string" ? JSON.parse(o.shipping_address) : o.shipping_address,
+            billing_address: typeof o.billing_address === "string" ? JSON.parse(o.billing_address) : o.billing_address,
+            shipping_methods: [
+                {
+                    id: "sm_" + o.id,
+                    name: o.shipping_method || "Standard Delivery",
+                    amount: parseFloat(o.shipping_total),
+                    total: parseFloat(o.shipping_total)
+                }
+            ],
+            payment_collections: [
+                {
+                    id: "paycol_" + o.id,
+                    payments: [
+                        {
+                            id: "pay_" + o.id,
+                            provider_id: o.payment_method || "manual",
+                            amount: parseFloat(o.total),
+                            created_at: o.created_at
+                        }
+                    ]
+                }
+            ],
+            created_at: o.created_at,
+            currency_code: "aud"
+        }))
+        res.status(200).json({ orders, count: orders.length })
+    } catch (err) {
+        console.error("List orders error:", err.message)
+        res.status(500).json({ message: "Failed to fetch orders" })
+    }
+})
+
+// Update Order Status and parameters
+app.post("/admin/orders/:id/status", async (req, res) => {
+    try {
+        const { status, payment_status, shipping_method, tracking_number } = req.body
+        const updates = []
+        const values = []
+        let idx = 1
+        if (status) { updates.push(`status = $${idx++}`); values.push(status) }
+        if (payment_status) { updates.push(`payment_status = $${idx++}`); values.push(payment_status) }
+        if (shipping_method) { updates.push(`shipping_method = $${idx++}`); values.push(shipping_method) }
+        if (tracking_number !== undefined) { updates.push(`tracking_number = $${idx++}`); values.push(tracking_number) }
+        
+        if (updates.length > 0) {
+            values.push(req.params.id)
+            await pool.query(`UPDATE rl_orders SET ${updates.join(", ")} WHERE id = $${idx}`, values)
+        }
+        res.status(200).json({ message: "Order updated successfully" })
+    } catch (err) {
+        console.error("Update order status error:", err.message)
+        res.status(500).json({ message: "Failed to update order status" })
+    }
+})
+
+// Update Order Tracking Details
+app.post("/admin/orders/:id/tracking", async (req, res) => {
+    try {
+        const { tracking_number, tracking_provider, tracking_link } = req.body
+        await pool.query(
+            "UPDATE rl_orders SET tracking_number = $1, tracking_provider = $2, tracking_link = $3 WHERE id = $4",
+            [tracking_number || null, tracking_provider || null, tracking_link || null, req.params.id]
+        )
+        res.status(200).json({ message: "Tracking information updated successfully" })
+    } catch (err) {
+        console.error("Update tracking error:", err.message)
+        res.status(500).json({ message: "Failed to update tracking information" })
+    }
+})
+
+// Add Order Private Note
+app.post("/admin/orders/:id/note", async (req, res) => {
+    try {
+        const { note } = req.body
+        if (!note) return res.status(400).json({ message: "Note text is required" })
+        const noteObj = {
+            id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+            text: note,
+            created_at: new Date().toISOString()
+        }
+        await pool.query(
+            "UPDATE rl_orders SET private_notes = COALESCE(private_notes, '[]'::jsonb) || $1::jsonb WHERE id = $2",
+            [JSON.stringify([noteObj]), req.params.id]
+        )
+        res.status(200).json({ message: "Note added successfully", note: noteObj })
+    } catch (err) {
+        console.error("Add note error:", err.message)
+        res.status(500).json({ message: "Failed to add note" })
     }
 })
 
