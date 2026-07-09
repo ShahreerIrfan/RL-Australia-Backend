@@ -710,6 +710,12 @@ async function initCartTables() {
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_address JSONB DEFAULT '{}'")
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS billing_address JSONB DEFAULT '{}'")
         await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_protection BOOLEAN DEFAULT false")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS shipping_method TEXT DEFAULT 'Standard Delivery'")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS tracking_number TEXT")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS tracking_provider TEXT")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS tracking_link TEXT")
+        await pool.query("ALTER TABLE rl_orders ADD COLUMN IF NOT EXISTS private_notes JSONB DEFAULT '[]'")
 
         // Ensure Glycine and NMN exist in rl_products and variants
         const glycineCheck = await pool.query("SELECT * FROM rl_products WHERE slug = 'glycine'")
@@ -1175,6 +1181,12 @@ app.get("/store/orders/:id", async (req, res) => {
                 tax_total: 0,
                 total: parseFloat(o.total),
                 status: o.status,
+                payment_status: o.payment_status || "pending",
+                shipping_method: o.shipping_method || "Standard Delivery",
+                tracking_number: o.tracking_number || null,
+                tracking_provider: o.tracking_provider || null,
+                tracking_link: o.tracking_link || null,
+                private_notes: typeof o.private_notes === "string" ? JSON.parse(o.private_notes) : (o.private_notes || []),
                 shipping_address: typeof o.shipping_address === "string" ? JSON.parse(o.shipping_address) : o.shipping_address,
                 billing_address: typeof o.billing_address === "string" ? JSON.parse(o.billing_address) : o.billing_address,
                 shipping_methods: [
@@ -1226,6 +1238,12 @@ app.get("/store/orders", async (req, res) => {
             tax_total: 0,
             total: parseFloat(o.total),
             status: o.status,
+            payment_status: o.payment_status || "pending",
+            shipping_method: o.shipping_method || "Standard Delivery",
+            tracking_number: o.tracking_number || null,
+            tracking_provider: o.tracking_provider || null,
+            tracking_link: o.tracking_link || null,
+            private_notes: typeof o.private_notes === "string" ? JSON.parse(o.private_notes) : (o.private_notes || []),
             shipping_address: typeof o.shipping_address === "string" ? JSON.parse(o.shipping_address) : o.shipping_address,
             billing_address: typeof o.billing_address === "string" ? JSON.parse(o.billing_address) : o.billing_address,
             shipping_methods: [
@@ -1259,15 +1277,62 @@ app.get("/store/orders", async (req, res) => {
     }
 })
 
-// Update Order Status
+// Update Order Status and parameters
 app.post("/admin/orders/:id/status", async (req, res) => {
     try {
-        const { status } = req.body
-        await pool.query("UPDATE rl_orders SET status = $1 WHERE id = $2", [status, req.params.id])
-        res.status(200).json({ message: "Order status updated successfully" })
+        const { status, payment_status, shipping_method, tracking_number } = req.body
+        const updates = []
+        const values = []
+        let idx = 1
+        if (status) { updates.push(`status = $${idx++}`); values.push(status) }
+        if (payment_status) { updates.push(`payment_status = $${idx++}`); values.push(payment_status) }
+        if (shipping_method) { updates.push(`shipping_method = $${idx++}`); values.push(shipping_method) }
+        if (tracking_number !== undefined) { updates.push(`tracking_number = $${idx++}`); values.push(tracking_number) }
+        
+        if (updates.length > 0) {
+            values.push(req.params.id)
+            await pool.query(`UPDATE rl_orders SET ${updates.join(", ")} WHERE id = $${idx}`, values)
+        }
+        res.status(200).json({ message: "Order updated successfully" })
     } catch (err) {
         console.error("Update order status error:", err.message)
         res.status(500).json({ message: "Failed to update order status" })
+    }
+})
+
+// Update Order Tracking Details
+app.post("/admin/orders/:id/tracking", async (req, res) => {
+    try {
+        const { tracking_number, tracking_provider, tracking_link } = req.body
+        await pool.query(
+            "UPDATE rl_orders SET tracking_number = $1, tracking_provider = $2, tracking_link = $3 WHERE id = $4",
+            [tracking_number || null, tracking_provider || null, tracking_link || null, req.params.id]
+        )
+        res.status(200).json({ message: "Tracking information updated successfully" })
+    } catch (err) {
+        console.error("Update tracking error:", err.message)
+        res.status(500).json({ message: "Failed to update tracking information" })
+    }
+})
+
+// Add Order Private Note
+app.post("/admin/orders/:id/note", async (req, res) => {
+    try {
+        const { note } = req.body
+        if (!note) return res.status(400).json({ message: "Note text is required" })
+        const noteObj = {
+            id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+            text: note,
+            created_at: new Date().toISOString()
+        }
+        await pool.query(
+            "UPDATE rl_orders SET private_notes = COALESCE(private_notes, '[]'::jsonb) || $1::jsonb WHERE id = $2",
+            [JSON.stringify([noteObj]), req.params.id]
+        )
+        res.status(200).json({ message: "Note added successfully", note: noteObj })
+    } catch (err) {
+        console.error("Add note error:", err.message)
+        res.status(500).json({ message: "Failed to add note" })
     }
 })
 
