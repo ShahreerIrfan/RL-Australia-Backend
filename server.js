@@ -269,6 +269,8 @@ function mapRowToProduct(row) {
         id: row.id,
         title: row.name,
         handle: row.slug,
+        price: Number(row.price),
+        original_price: Number(row.original_price || row.price),
         description: row.description,
         short_description: row.short_description,
         thumbnail: row.image_url || "/assets/peptide-vial.png",
