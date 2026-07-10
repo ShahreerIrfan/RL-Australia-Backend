@@ -1125,6 +1125,53 @@ app.post("/store/carts/:id/complete", async (req, res) => {
         const paymentMethod = cartDbRes.rows[0]?.payment_method || "manual"
         const shippingProtection = !!cartDbRes.rows[0]?.shipping_protection
 
+        if (paymentMethod === "paytree") {
+            const PAYTREE_API_TOKEN = process.env.PAYTREE_API_TOKEN || "95868f612d9b87b59f9dc4c6ef3cfe7be32001e1"
+            const PAYTREE_API_URL = process.env.PAYTREE_API_URL || "https://app.secured-checkout.com"
+            
+            const host = req.headers.host || "rl.eezzymart.tech"
+            const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'
+            const PAYTREE_CALLBACK_URL = process.env.PAYTREE_CALLBACK_URL || `${protocol}://${host}/store/paytree-callback`
+
+            // Clean up any previous pending order for this cart to prevent duplicates
+            await pool.query("DELETE FROM rl_orders WHERE cart_id = $1 AND status = 'pending'", [cart.id])
+
+            // Call Paytree API to initiate payment session
+            const paytreeResponse = await fetch(`${PAYTREE_API_URL}/v1/transaction/payment/`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Token ${PAYTREE_API_TOKEN}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    amount: cart.total.toFixed(2),
+                    currency: cart.currency_code.toUpperCase(),
+                    transaction_ref: cart.id,
+                    callback_url: `${PAYTREE_CALLBACK_URL}?payment_intent_id={payment_intent_id}&transaction_id={transaction_id}`
+                })
+            })
+
+            if (!paytreeResponse.ok) {
+                const errText = await paytreeResponse.text()
+                console.error("Paytree API error response:", errText)
+                return res.status(400).json({ message: "Failed to initiate payment gateway." })
+            }
+
+            const paytreeData = await paytreeResponse.json()
+            const checkoutUrl = paytreeData.checkout_url || paytreeData.payment_url
+
+            // Insert a pending order to record it in our database
+            await pool.query(
+                "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, payment_status, shipping_address, billing_address, order_number, payment_method, shipping_protection) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+                [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "pending", "awaiting_payment", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {}), "ORD-" + Date.now(), "paytree", shippingProtection]
+            )
+
+            return res.status(200).json({
+                type: "paytree_redirect",
+                checkout_url: checkoutUrl
+            })
+        }
+
         const orderInsertRes = await pool.query(
             "INSERT INTO rl_orders (cart_id, email, items, subtotal, shipping_total, total, status, shipping_address, billing_address, order_number, payment_method, shipping_protection) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *",
             [cart.id, cart.email, JSON.stringify(cart.items), cart.subtotal, cart.shipping_total, cart.total, "confirmed", JSON.stringify(cart.shipping_address), JSON.stringify(cart.billing_address || {}), "ORD-" + Date.now(), paymentMethod, shippingProtection]
@@ -1149,6 +1196,79 @@ app.post("/store/carts/:id/complete", async (req, res) => {
     } catch (err) {
         console.error("Complete cart error:", err.message)
         res.status(500).json({ message: "Failed to complete checkout" })
+    }
+})
+
+// Paytree Callback verification handler
+app.get("/store/paytree-callback", async (req, res) => {
+    try {
+        const { payment_intent_id, transaction_id } = req.query
+        if (!payment_intent_id) {
+            return res.status(400).send("Missing payment_intent_id")
+        }
+
+        const PAYTREE_API_TOKEN = process.env.PAYTREE_API_TOKEN || "95868f612d9b87b59f9dc4c6ef3cfe7be32001e1"
+        const PAYTREE_API_URL = process.env.PAYTREE_API_URL || "https://app.secured-checkout.com"
+
+        // Verify status with Paytree API
+        const verifyRes = await fetch(`${PAYTREE_API_URL}/v1/transaction/payment/${payment_intent_id}/`, {
+            method: "GET",
+            headers: {
+                "Authorization": `Token ${PAYTREE_API_TOKEN}`
+            }
+        })
+
+        if (!verifyRes.ok) {
+            console.error("Paytree verification request failed:", await verifyRes.text())
+            return res.status(400).send("Verification request failed")
+        }
+
+        const verifyData = await verifyRes.json()
+        const status = verifyData.status
+        const cartId = verifyData.transaction_ref
+
+        if (status === "success" && cartId) {
+            // Find the pending order for this cart
+            const orderRes = await pool.query("SELECT id, shipping_address FROM rl_orders WHERE cart_id::text = $1 AND status = 'pending'", [cartId])
+            if (orderRes.rows.length > 0) {
+                const order = orderRes.rows[0]
+                
+                // Update order to confirmed and payment_status to paid
+                await pool.query(
+                    "UPDATE rl_orders SET status = 'confirmed', payment_status = 'paid' WHERE id = $1",
+                    [order.id]
+                )
+
+                // Clear cart items
+                await pool.query("DELETE FROM rl_cart_items WHERE cart_id = $1", [cartId])
+
+                let countryCode = "au"
+                try {
+                    const shippingAddr = typeof order.shipping_address === "string" ? JSON.parse(order.shipping_address) : order.shipping_address
+                    if (shippingAddr?.country_code) {
+                        countryCode = shippingAddr.country_code.toLowerCase()
+                    }
+                } catch (e) {
+                    console.error("Failed to parse shipping address for country redirect:", e)
+                }
+
+                // If it's a browser request, redirect to confirmation page
+                const isBrowser = req.headers.accept && req.headers.accept.includes("text/html")
+                if (isBrowser) {
+                    const frontendBase = process.env.STORE_CORS ? process.env.STORE_CORS.split(",")[0] : "https://rl-australia.vercel.app"
+                    return res.redirect(`${frontendBase}/${countryCode}/order/${order.id}/confirmed?clear_cart=true`)
+                } else {
+                    return res.status(200).send("OK")
+                }
+            } else {
+                return res.status(404).send("Pending order not found for this cart reference")
+            }
+        } else {
+            return res.status(400).send(`Payment status verification is: ${status}`)
+        }
+    } catch (err) {
+        console.error("Paytree verification callback error:", err)
+        res.status(500).send("Internal server verification error")
     }
 })
 
