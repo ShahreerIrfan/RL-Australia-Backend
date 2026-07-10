@@ -837,9 +837,20 @@ async function buildCartResponse(cartId) {
         }
     })
 
+    // Fetch free shipping threshold from settings
+    let threshold = 200;
+    try {
+        const thresholdRes = await pool.query("SELECT value FROM rl_store_settings WHERE key = 'free_shipping_threshold'")
+        if (thresholdRes.rows.length > 0) {
+            threshold = parseFloat(thresholdRes.rows[0].value) || 200;
+        }
+    } catch (e) {
+        console.error("Error fetching shipping threshold setting:", e.message)
+    }
+
     const subtotal = items.reduce((sum, i) => sum + i.total, 0)
-    // Free shipping threshold of $200
-    const shippingTotal = (subtotal >= 200 && subtotal > 0) ? 0.00 : (parseFloat(cart.shipping_total) || 9.95)
+    // Free shipping threshold
+    const shippingTotal = (subtotal >= threshold && subtotal > 0) ? 0.00 : (parseFloat(cart.shipping_total) || 9.95)
     // Shipping protection cost is $6.50 if enabled
     const protectionTotal = cart.shipping_protection ? 6.50 : 0.00
     const total = subtotal + shippingTotal + protectionTotal
