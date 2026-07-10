@@ -1498,6 +1498,57 @@ app.delete("/store/recommendations/:id", async (req, res) => {
     }
 })
 
+// ============ STORE SETTINGS (Dynamic Configuration) ============
+
+// Initialize settings table
+async function initSettingsTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS rl_store_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        `)
+        // Seed default free shipping threshold if not exists
+        await pool.query(`
+            INSERT INTO rl_store_settings (key, value) VALUES ('free_shipping_threshold', '200')
+            ON CONFLICT (key) DO NOTHING
+        `)
+    } catch (err) {
+        console.error("Error creating settings table:", err.message)
+    }
+}
+initSettingsTable()
+
+// GET /store/settings - Get all store settings (public)
+app.get("/store/settings", async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM rl_store_settings")
+        const settings = {}
+        result.rows.forEach(row => { settings[row.key] = row.value })
+        res.json({ settings })
+    } catch (err) {
+        res.status(500).json({ message: err.message })
+    }
+})
+
+// POST /store/settings - Update a setting
+app.post("/store/settings", async (req, res) => {
+    try {
+        const { key, value } = req.body
+        if (!key) return res.status(400).json({ message: "key is required" })
+        await pool.query(
+            `INSERT INTO rl_store_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+             ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+            [key, String(value)]
+        )
+        res.json({ message: "Setting updated", key, value })
+    } catch (err) {
+        res.status(500).json({ message: err.message })
+    }
+})
+
 // ============ START ============
 
 app.listen(PORT, () => {
