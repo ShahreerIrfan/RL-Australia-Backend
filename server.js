@@ -1143,7 +1143,7 @@ app.post("/store/carts/:id/complete", async (req, res) => {
 
             // Build correct Paytree payload
             const payload = {
-                transaction_ref: cart.id,
+                transaction_ref: `${cart.id}_${Date.now()}`,
                 client_ref: cart.email,
                 amount: cart.total.toFixed(2),
                 amount_currency: cart.currency_code.toUpperCase(),
@@ -1255,7 +1255,8 @@ app.get("/store/paytree-callback", async (req, res) => {
 
         const verifyData = await verifyRes.json()
         const status = verifyData.status
-        const cartId = verifyData.transaction_ref
+        const rawCartId = verifyData.transaction_ref
+        const cartId = rawCartId && rawCartId.includes("_") ? rawCartId.split("_")[0] : rawCartId
 
         if (status === "success" && cartId) {
             // Find the pending order for this cart
