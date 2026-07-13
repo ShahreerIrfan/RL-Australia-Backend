@@ -1127,7 +1127,12 @@ app.post("/store/carts/:id/complete", async (req, res) => {
 
         if (paymentMethod === "paytree") {
             const PAYTREE_API_TOKEN = process.env.PAYTREE_API_TOKEN || "95868f612d9b87b59f9dc4c6ef3cfe7be32001e1"
-            const PAYTREE_API_URL = process.env.PAYTREE_API_URL || "https://app.secured-checkout.com/api"
+            let PAYTREE_API_URL = process.env.PAYTREE_API_URL || "https://app.secured-checkout.com/api"
+            if (PAYTREE_API_URL.endsWith("secured-checkout.com")) {
+                PAYTREE_API_URL += "/api"
+            } else if (PAYTREE_API_URL.endsWith("secured-checkout.com/")) {
+                PAYTREE_API_URL = PAYTREE_API_URL.slice(0, -1) + "/api"
+            }
             
             const host = req.headers.host || "rl.eezzymart.tech"
             const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'
