@@ -1385,7 +1385,13 @@ app.get("/store/orders/:id", async (req, res) => {
 // List Orders
 app.get("/store/orders", async (req, res) => {
     try {
-        const result = await pool.query("SELECT * FROM rl_orders ORDER BY created_at DESC")
+        const { email } = req.query
+        let result;
+        if (email) {
+            result = await pool.query("SELECT * FROM rl_orders WHERE email = $1 ORDER BY created_at DESC", [email])
+        } else {
+            result = await pool.query("SELECT * FROM rl_orders ORDER BY created_at DESC")
+        }
         const orders = result.rows.map(o => ({
             id: o.id,
             order_number: o.order_number,
