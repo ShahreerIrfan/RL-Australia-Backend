@@ -1629,6 +1629,159 @@ app.delete("/store/recommendations/:id", async (req, res) => {
     }
 })
 
+// ============ QUIZ QUESTIONS & RECOMMENDATIONS ============
+
+// Initialize quiz questions table
+async function initQuizQuestionsTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS rl_quiz_questions (
+                id TEXT PRIMARY KEY,
+                question_text TEXT NOT NULL,
+                order_number INTEGER DEFAULT 0,
+                image_url TEXT DEFAULT NULL,
+                options JSONB DEFAULT '[]'::jsonb,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        `)
+    } catch (err) {
+        console.error("Error creating quiz questions table:", err.message)
+    }
+}
+initQuizQuestionsTable()
+
+// GET /store/quiz - List all quiz questions (public)
+app.get("/store/quiz", async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM rl_quiz_questions ORDER BY order_number ASC")
+        res.json({ questions: result.rows })
+    } catch (err) {
+        res.status(500).json({ message: err.message || "Failed to fetch quiz questions" })
+    }
+})
+
+// POST /store/quiz - Create a new quiz question (admin only)
+app.post("/store/quiz", async (req, res) => {
+    try {
+        const { question_text, order_number, image_url, options } = req.body
+        if (!question_text) {
+            return res.status(400).json({ message: "question_text is required" })
+        }
+        const id = "q_" + Math.random().toString(36).slice(2)
+        const result = await pool.query(
+            `INSERT INTO rl_quiz_questions (id, question_text, order_number, image_url, options)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING *`,
+            [id, question_text, Number(order_number) || 0, image_url || null, JSON.stringify(options || [])]
+        )
+        res.status(201).json({ question: result.rows[0] })
+    } catch (err) {
+        res.status(500).json({ message: err.message || "Failed to create quiz question" })
+    }
+})
+
+// POST /store/quiz/:id - Update an existing quiz question (admin only)
+app.post("/store/quiz/:id", async (req, res) => {
+    try {
+        const { id } = req.params
+        const { question_text, order_number, image_url, options } = req.body
+        
+        const updates = []
+        const values = []
+        let idx = 1
+        
+        if (question_text !== undefined) { updates.push(`question_text = $${idx++}`); values.push(question_text) }
+        if (order_number !== undefined) { updates.push(`order_number = $${idx++}`); values.push(Number(order_number)) }
+        if (image_url !== undefined) { updates.push(`image_url = $${idx++}`); values.push(image_url) }
+        if (options !== undefined) { updates.push(`options = $${idx++}`); values.push(JSON.stringify(options)) }
+        
+        if (updates.length === 0) {
+            return res.status(400).json({ message: "No fields to update" })
+        }
+        
+        updates.push(`updated_at = NOW()`)
+        values.push(id)
+        
+        const queryText = `UPDATE rl_quiz_questions SET ${updates.join(", ")} WHERE id = $${idx} RETURNING *`
+        const result = await pool.query(queryText, values)
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Quiz question not found" })
+        }
+        res.json({ question: result.rows[0] })
+    } catch (err) {
+        res.status(500).json({ message: err.message || "Failed to update quiz question" })
+    }
+})
+
+// DELETE /store/quiz/:id - Delete a quiz question (admin only)
+app.delete("/store/quiz/:id", async (req, res) => {
+    try {
+        const { id } = req.params
+        await pool.query("DELETE FROM rl_quiz_questions WHERE id = $1", [id])
+        res.json({ message: "Deleted successfully" })
+    } catch (err) {
+        res.status(500).json({ message: err.message || "Failed to delete quiz question" })
+    }
+})
+
+// GET /store/quiz/recommendations - Get recommended products by ID (public)
+app.get("/store/quiz/recommendations", async (req, res) => {
+    try {
+        const idsParam = req.query.product_ids
+        if (!idsParam) {
+            return res.json({ products: [] })
+        }
+        const productIds = idsParam.split(",").filter(Boolean)
+        if (productIds.length === 0) {
+            return res.json({ products: [] })
+        }
+        
+        const placeholders = productIds.map((_, i) => `$${i + 1}`).join(",")
+        
+        const prodResult = await pool.query(
+            `SELECT p.*, c.name as category_name 
+             FROM rl_products p 
+             LEFT JOIN rl_categories c ON p.category_id = c.id 
+             WHERE p.id::text IN (${placeholders})`,
+            productIds
+        )
+        
+        const products = await Promise.all(
+            prodResult.rows.map(async (row) => {
+                const variantsResult = await pool.query(
+                    "SELECT * FROM rl_product_variants WHERE product_id = $1 ORDER BY price ASC",
+                    [row.id]
+                )
+                
+                const baseProduct = mapRowToProduct(row)
+                if (variantsResult.rows.length > 0) {
+                    baseProduct.variants = variantsResult.rows.map(v => ({
+                        id: v.id,
+                        sku: v.sku || "",
+                        title: v.title,
+                        price: Number(v.price),
+                        original_price: Number(v.original_price || v.price),
+                        calculated_price: {
+                            calculated_amount: Number(v.price),
+                            original_amount: Number(v.original_price || v.price),
+                            currency_code: "aud",
+                            calculated_price: { price_list_type: null }
+                        }
+                    }))
+                }
+                return baseProduct
+            })
+        )
+        
+        res.json({ products })
+    } catch (err) {
+        res.status(500).json({ message: err.message || "Failed to fetch quiz recommendations" })
+    }
+})
+
+
 // ============ STORE SETTINGS (Dynamic Configuration) ============
 
 // Initialize settings table
