@@ -187,6 +187,30 @@ app.get("/store/auth/me", async (req, res) => {
     }
 })
 
+// Change Customer Password
+app.post("/store/customer/change-password", async (req, res) => {
+    try {
+        const { email, old_password, new_password } = req.body
+        if (!email || !old_password || !new_password) {
+            return res.status(400).json({ message: "Missing required fields" })
+        }
+        const userRes = await pool.query("SELECT id, password_hash FROM rl_customers WHERE email = $1", [email.toLowerCase()])
+        if (userRes.rows.length === 0) {
+            return res.status(404).json({ message: "Customer not found" })
+        }
+        const customer = userRes.rows[0]
+        if (hashPassword(old_password) !== customer.password_hash) {
+            return res.status(401).json({ message: "Incorrect old password" })
+        }
+        const new_hash = hashPassword(new_password)
+        await pool.query("UPDATE rl_customers SET password_hash = $1 WHERE id = $2", [new_hash, customer.id])
+        res.status(200).json({ message: "Password changed successfully" })
+    } catch (err) {
+        console.error("Change password error:", err.message)
+        res.status(500).json({ message: "Failed to change password" })
+    }
+})
+
 // ============ PRODUCT & UPLOAD ROUTES ============
 const path = require("path")
 const fs = require("fs")
