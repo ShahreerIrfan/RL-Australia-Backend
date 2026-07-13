@@ -40,5 +40,8 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/car",
     },
+    {
+      resolve: "./src/modules/quiz",
+    },
   ]
 })
