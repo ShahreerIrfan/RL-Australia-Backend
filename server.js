@@ -1127,7 +1127,7 @@ app.post("/store/carts/:id/complete", async (req, res) => {
 
         if (paymentMethod === "paytree") {
             const PAYTREE_API_TOKEN = process.env.PAYTREE_API_TOKEN || "95868f612d9b87b59f9dc4c6ef3cfe7be32001e1"
-            const PAYTREE_API_URL = process.env.PAYTREE_API_URL || "https://app.secured-checkout.com"
+            const PAYTREE_API_URL = process.env.PAYTREE_API_URL || "https://app.secured-checkout.com/api"
             
             const host = req.headers.host || "rl.eezzymart.tech"
             const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'
@@ -1136,19 +1136,44 @@ app.post("/store/carts/:id/complete", async (req, res) => {
             // Clean up any previous pending order for this cart to prevent duplicates
             await pool.query("DELETE FROM rl_orders WHERE cart_id = $1 AND status = 'pending'", [cart.id])
 
+            // Build correct Paytree payload
+            const payload = {
+                transaction_ref: cart.id,
+                client_ref: cart.email,
+                amount: cart.total.toFixed(2),
+                amount_currency: cart.currency_code.toUpperCase(),
+                method: "card",
+                customer: {
+                    first_name: cart.shipping_address?.first_name || "Guest",
+                    last_name: cart.shipping_address?.last_name || "Customer",
+                    email: cart.email,
+                    phone: cart.shipping_address?.phone || ""
+                },
+                address: {
+                    street: cart.shipping_address?.address_1 || "",
+                    city: cart.shipping_address?.city || "",
+                    state: cart.shipping_address?.province || "",
+                    zip: cart.shipping_address?.postal_code || "",
+                    country: (cart.shipping_address?.country_code || "au").toLowerCase()
+                },
+                session: {
+                    ip_address: req.ip || req.headers["x-forwarded-for"] || "127.0.0.1",
+                    user_agent: req.headers["user-agent"] || "Mozilla/5.0"
+                },
+                callback: {
+                    notification_url: `${PAYTREE_CALLBACK_URL}?payment_intent_id={payment_intent_id}&transaction_id={transaction_id}`,
+                    return_url: `${PAYTREE_CALLBACK_URL}?payment_intent_id={payment_intent_id}&transaction_id={transaction_id}`
+                }
+            }
+
             // Call Paytree API to initiate payment session
-            const paytreeResponse = await fetch(`${PAYTREE_API_URL}/v1/transaction/payment/`, {
+            const paytreeResponse = await fetch(`${PAYTREE_API_URL}/v1/transaction/payment_intent/`, {
                 method: "POST",
                 headers: {
                     "Authorization": `Token ${PAYTREE_API_TOKEN}`,
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({
-                    amount: cart.total.toFixed(2),
-                    currency: cart.currency_code.toUpperCase(),
-                    transaction_ref: cart.id,
-                    callback_url: `${PAYTREE_CALLBACK_URL}?payment_intent_id={payment_intent_id}&transaction_id={transaction_id}`
-                })
+                body: JSON.stringify(payload)
             })
 
             if (!paytreeResponse.ok) {
@@ -1158,7 +1183,7 @@ app.post("/store/carts/:id/complete", async (req, res) => {
             }
 
             const paytreeData = await paytreeResponse.json()
-            const checkoutUrl = paytreeData.checkout_url || paytreeData.payment_url
+            const checkoutUrl = paytreeData.payment_link || paytreeData.checkout_url || paytreeData.payment_url
 
             // Insert a pending order to record it in our database
             await pool.query(
