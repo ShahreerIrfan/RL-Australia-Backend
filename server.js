@@ -1320,7 +1320,7 @@ app.post("/store/carts/:id/shipping-protection", async (req, res) => {
 // Get Order by ID
 app.get("/store/orders/:id", async (req, res) => {
     try {
-        let orderRes = await pool.query("SELECT * FROM rl_orders WHERE id::text = $1 OR order_number = $2", [req.params.id, req.params.id])
+        let orderRes = await pool.query("SELECT * FROM rl_orders WHERE id::text = $1 OR order_number = $2 OR tracking_number = $2", [req.params.id, req.params.id])
         if (orderRes.rows.length === 0) {
             orderRes = await pool.query("SELECT * FROM rl_orders WHERE cart_id::text = $1", [req.params.id])
         }
