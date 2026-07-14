@@ -1262,10 +1262,15 @@ app.get("/store/paytree-callback", async (req, res) => {
         }
 
         const PAYTREE_API_TOKEN = process.env.PAYTREE_API_TOKEN || "95868f612d9b87b59f9dc4c6ef3cfe7be32001e1"
-        const PAYTREE_API_URL = process.env.PAYTREE_API_URL || "https://app.secured-checkout.com"
+        let PAYTREE_API_URL = process.env.PAYTREE_API_URL || "https://app.secured-checkout.com/api"
+        if (PAYTREE_API_URL.endsWith("secured-checkout.com")) {
+            PAYTREE_API_URL += "/api"
+        } else if (PAYTREE_API_URL.endsWith("secured-checkout.com/")) {
+            PAYTREE_API_URL = PAYTREE_API_URL.slice(0, -1) + "/api"
+        }
 
         // Verify status with Paytree API
-        const verifyRes = await fetch(`${PAYTREE_API_URL}/v1/transaction/payment/${payment_intent_id}/`, {
+        const verifyRes = await fetch(`${PAYTREE_API_URL}/v1/transaction/payment_intent/${payment_intent_id}/`, {
             method: "GET",
             headers: {
                 "Authorization": `Token ${PAYTREE_API_TOKEN}`
